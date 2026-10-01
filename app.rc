@@ -1,0 +1,25 @@
+1 24 "app.manifest"
+101 ICON "assets/LaseScanViewer.ico"
+
+1 VERSIONINFO
+FILEVERSION 3,26,0,0
+PRODUCTVERSION 3,26,0,0
+FILEOS 0x40004L
+FILETYPE 0x1L
+BEGIN
+ BLOCK "StringFileInfo"
+ BEGIN
+  BLOCK "040904B0"
+  BEGIN
+   VALUE "FileDescription", "LaseScanViewer\0"
+   VALUE "ProductName", "LaseScanViewer\0"
+   VALUE "FileVersion", "3.26.0\0"
+   VALUE "ProductVersion", "3.26.0\0"
+  END
+ END
+ BLOCK "VarFileInfo"
+ BEGIN
+  VALUE "Translation", 0x409, 1200
+ END
+END
+

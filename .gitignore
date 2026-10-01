@@ -1,0 +1,17 @@
+.tools/
+build/
+dist/
+releases/
+__pycache__/
+*.pyc
+*.exe
+*.o
+*.obj
+*.res
+*.ini
+*.bin
+*.sq3
+*.sq3-wal
+*.sq3-shm
+*.npy
+*.zip
