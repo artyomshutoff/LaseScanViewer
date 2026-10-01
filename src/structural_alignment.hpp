@@ -43,7 +43,22 @@ inline CompareOptions fitStructure(const SurfaceCloud& a,const SurfaceCloud& b,C
 inline std::optional<CompareOptions> rescueStructure(const Model& active,const Model& base,const CompareOptions& original,double span){
  SurfaceCloud a(steepSurfaces(active,span/300)),b(steepSurfaces(base,span/300));if(a.tree.nodes.size()<150||b.tree.nodes.size()<150)return {};auto before=structuralScore(a,b,original,span),best=before;auto winner=original;bool xAxis=active.hi.x-active.lo.x>active.hi.y-active.lo.y;
  for(double offset:{0.,-.08,-.04,.04,.08}){auto seed=original;if(xAxis)seed.dx+=offset*span;else seed.dy+=offset*span;auto fitted=fitStructure(a,b,seed,span);if(std::abs(std::remainder(fitted.angle-original.angle,360.))>5||std::hypot(fitted.dx-original.dx,fitted.dy-original.dy)>span*.12)continue;auto score=structuralScore(a,b,fitted,span);if(score.spread&&score.cost<best.cost){best=score;winner=fitted;}}
- if(best.spread&&best.coverage>=before.coverage+.04&&best.coverage>before.coverage*1.3&&best.cost<before.cost*.94)return winner;return {};
+ if(best.spread&&best.coverage>=before.coverage+.04&&best.coverage>before.coverage*1.3&&best.cost<before.cost*.94)return winner;
+ // Long side walls admit a false longitudinal match after a reversed scan.
+ // The local window cannot escape a displacement of several metres. Try a
+ // wider window only after the established local rescue failed, and require
+ // independent starting offsets to converge on the same distributed structure.
+ struct Candidate {CompareOptions pose;StructureFit score;};std::vector<Candidate> broad;
+ for(double offset:{-.24,-.20,-.16,-.12,.12,.16,.20,.24}){
+  auto seed=original;if(xAxis)seed.dx+=offset*span;else seed.dy+=offset*span;
+  auto fitted=fitStructure(a,b,seed,span);double movement=std::hypot(fitted.dx-original.dx,fitted.dy-original.dy);
+  if(std::abs(std::remainder(fitted.angle-original.angle,360.))>5||movement<=span*.12||movement>span*.28)continue;
+  auto score=structuralScore(a,b,fitted,span);
+  if(score.spread&&score.coverage>=before.coverage+.05&&score.coverage>before.coverage*1.12&&score.cost<before.cost*.93&&score.rms<before.rms*.97)broad.push_back({fitted,score});
+ }
+ std::sort(broad.begin(),broad.end(),[](const Candidate& x,const Candidate& y){return x.score.cost<y.score.cost;});
+ for(const auto& candidate:broad){size_t agreement=0;for(const auto& other:broad)if(std::abs(std::remainder(candidate.pose.angle-other.pose.angle,360.))<.5&&std::hypot(candidate.pose.dx-other.pose.dx,candidate.pose.dy-other.pose.dy)<span*.015)++agreement;if(agreement>=2)return candidate.pose;}
+ return {};
 }
 
 

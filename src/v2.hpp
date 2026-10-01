@@ -209,7 +209,7 @@ try{
 }catch(const std::exception& e){MessageBoxW(mainWin,widen(e.what()).c_str(),L"LaseScanViewer",MB_ICONEXCLAMATION);}}
 
 void runV2Test(){try{
-    wchar_t title[1024];GetWindowTextW(mainWin,title,1024);if(GetMenu(mainWin)||std::wstring(title).find(L"[Version: 3.26.0]")==std::wstring::npos)throw std::runtime_error("Menu or version title failed");
+    wchar_t title[1024];GetWindowTextW(mainWin,title,1024);if(GetMenu(mainWin)||std::wstring(title).find(L"[Version: 3.27.0]")==std::wstring::npos)throw std::runtime_error("Menu or version title failed");
     if(!std::filesystem::exists(preferencesFile())&&lightTheme)throw std::runtime_error("Default theme must be dark");
     std::filesystem::create_directories(renderTestDir);
     if(documents.size()!=2)throw std::runtime_error("Multi-file queue did not load two documents");

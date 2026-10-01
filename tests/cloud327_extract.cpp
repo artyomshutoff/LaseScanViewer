@@ -1,0 +1,3 @@
+#include "../src/registration.hpp"
+#include <iostream>
+int wmain(int argc,wchar_t** argv){if(argc<4)return 2;auto a=readModel(argv[1]),b=readModel(argv[2]);auto result=registration::align(a,b,{});std::filesystem::path folder(argv[3]);std::filesystem::create_directories(folder);for(auto p:std::initializer_list<std::pair<const char*,Model*>>{{"full.xyz",&a},{"empty.xyz",&b}}){std::ofstream f(folder/p.first,std::ios::binary);for(auto q:p.second->points){if(p.second==&b)q=transformBase(q,result.options);f.write(reinterpret_cast<char*>(&q),sizeof(q));}}std::cout<<a.label<<' '<<a.lo.x<<' '<<a.hi.x<<' '<<a.points.size()<<' '<<b.points.size()<<'\n';}

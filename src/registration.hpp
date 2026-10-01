@@ -167,7 +167,7 @@ inline Result alignClouds(const Model& active,const Model& base,CompareOptions o
         adjusted=refineBedHeight(active,base,adjusted);best=evaluate(adjusted);
     }
     if(progress)progress(98);
-    if(active.kind==2&&base.kind==1&&best.overlap<.45){
+    if(active.kind==2&&base.kind==1&&best.overlap<.55){
         if(auto rescued=rescueStructure(active,base,best.options,span)){auto adjusted=*rescued;adjusted.dz-=adjusted.rimHeightAdjustment+adjusted.bedHeightAdjustment;adjusted.rimHeightAdjustment=rimHeightCorrection(active,base,adjusted);adjusted.dz+=adjusted.rimHeightAdjustment;adjusted=refineBedHeight(active,base,adjusted);best=evaluate(adjusted);best.structureRefined=true;}
     }
     double cap=span*.015;

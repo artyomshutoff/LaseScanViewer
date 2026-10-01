@@ -19,7 +19,7 @@ Model model; std::filesystem::path loadedPath,pendingPath; std::future<Model> lo
 std::filesystem::path renderTestDir;
 bool busy=false,mesh=false,grid=false; float yaw=160,pitch=45,zoom=1,panX=0,panY=0,pointSize=1,orthoHeight=1;
 POINT mouse{}; int dragging=0; GLuint pointList=0,faceList=0,textList=0,bigTextList=0; int viewW=1,viewH=1;
-constexpr wchar_t applicationTitle[]=L"LaseScanViewer [Version: 3.26.0]";
+constexpr wchar_t applicationTitle[]=L"LaseScanViewer [Version: 3.27.0]";
 constexpr int OPEN=101,POINT_MODE=102,SURFACE=103,RESET=104,TOP=105,FRONT=106,SIDE=107,EXPORT=108,GRID=109,SMALL=110,LARGE=111,GROUP0=112,GROUP1=113;
 #include "v2_state.hpp"
 std::wstring widen(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),nullptr,0);std::wstring w(n,0);MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),w.data(),n);return w;}
