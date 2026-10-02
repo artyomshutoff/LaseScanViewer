@@ -213,8 +213,28 @@ try{
     }
 }catch(const std::exception& e){MessageBoxW(mainWin,widen(e.what()).c_str(),L"LaseScanViewer",MB_ICONEXCLAMATION);}}
 
+void runCaptionRefreshTest(){try{
+    std::filesystem::create_directories(renderTestDir);ShowWindow(mainWin,SW_SHOW);SetActiveWindow(mainWin);UpdateWindow(mainWin);
+    RECT initial,initialClient;GetWindowRect(mainWin,&initial);GetClientRect(mainWin,&initialClient);auto active=GetActiveWindow();auto focus=GetFocus();auto resizeEvents=captionSizeEvents;
+    float oldYaw=yaw,oldPitch=pitch,oldZoom=zoom,oldX=panX,oldY=panY;
+    std::ofstream audit(renderTestDir/L"caption-colors.txt");
+    for(int cycle=0;cycle<6;++cycle){bool light=(cycle%2)==1;v2Command(light?THEME_LIGHT:THEME_DARK);
+        RECT current,client;GetWindowRect(mainWin,&current);GetClientRect(mainWin,&client);
+        if(!EqualRect(&initial,&current)||!EqualRect(&initialClient,&client)||captionSizeEvents!=resizeEvents||GetActiveWindow()!=active||GetFocus()!=focus)throw std::runtime_error("Caption refresh resized window or changed focus");
+        if(yaw!=oldYaw||pitch!=oldPitch||zoom!=oldZoom||panX!=oldX||panY!=oldY)throw std::runtime_error("Caption refresh changed camera");
+        // Capture the composed native frame without a test repaint or resize.
+        // GetWindowDC alone can expose an obsolete GDI surface under DWM.
+        COLORREF color=saveCaptionTest(renderTestDir/(light?L"caption-immediate-light.png":L"caption-immediate-dark.png"),false);
+        if(color==CLR_INVALID)throw std::runtime_error("Cannot read native caption pixel");
+        int brightness=(int(GetRValue(color))+GetGValue(color)+GetBValue(color))/3;
+        audit<<(light?"light ":"dark ")<<brightness<<" RGB "<<int(GetRValue(color))<<","<<int(GetGValue(color))<<","<<int(GetBValue(color))<<"\n";
+        if((light&&brightness<170)||(!light&&brightness>100))throw std::runtime_error("Caption did not change immediately");
+    }
+    applyTheme(false);std::ofstream(renderTestDir/L"caption-ok.txt")<<"PASS 6 immediate native-caption switches; no resize messages, geometry, focus or camera changes";
+}catch(const std::exception& e){std::ofstream(renderTestDir/L"caption-error.txt")<<e.what();}}
+
 void runV2Test(){try{
-    wchar_t title[1024];GetWindowTextW(mainWin,title,1024);if(GetMenu(mainWin)||std::wstring(title).find(L"[Version: 3.30.0]")==std::wstring::npos)throw std::runtime_error("Menu or version title failed");
+    wchar_t title[1024];GetWindowTextW(mainWin,title,1024);if(GetMenu(mainWin)||std::wstring(title).find(L"[Version: 3.30.2]")==std::wstring::npos)throw std::runtime_error("Menu or version title failed");
     if(!std::filesystem::exists(preferencesFile())&&lightTheme)throw std::runtime_error("Default theme must be dark");
     std::filesystem::create_directories(renderTestDir);
     if(documents.size()!=2)throw std::runtime_error("Multi-file queue did not load two documents");

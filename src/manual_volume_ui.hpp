@@ -107,10 +107,8 @@ void manualChangeUnits(ManualDialog& d,bool centimetres){
  auto rows=d.rows;
  for(auto& row:rows)for(auto& text:row)if(!manualVolume::blank(text)){
   auto value=manualVolume::dimension(text);if(!value){SendDlgItemMessageW(d.window,MANUAL_UNITS,CB_SETCURSEL,d.centimetres,0);MessageBoxW(d.window,L"Исправьте некорректный размер перед сменой единиц.",L"Единицы измерения",MB_ICONINFORMATION);return;}
-  double converted=*value*(centimetres?100:.01);if(!std::isfinite(converted)||converted<=0){SendDlgItemMessageW(d.window,MANUAL_UNITS,CB_SETCURSEL,d.centimetres,0);return;}
-  // Fixed notation remains accepted by the input parser, including tiny values.
-  std::wostringstream out;out.imbue(std::locale::classic());out<<std::fixed<<std::setprecision(std::max(0,16-int(std::floor(std::log10(converted)))))<<converted;text=out.str();
-  if(text.find(L'.')!=std::wstring::npos){while(text.back()==L'0')text.pop_back();if(text.back()==L'.')text.pop_back();}
+  auto converted=manualVolume::convertDimension(text,centimetres);if(!converted){SendDlgItemMessageW(d.window,MANUAL_UNITS,CB_SETCURSEL,d.centimetres,0);MessageBoxW(d.window,L"Размер после перевода выходит за допустимый числовой диапазон.",L"Единицы измерения",MB_ICONINFORMATION);return;}
+  text=*converted;
  }
  d.centimetres=centimetres;manualCentimetres=centimetres;d.rows=std::move(rows);
  const wchar_t* names[]={L"Длина",L"Ширина",L"Высота"};for(int j=0;j<3;++j)SetWindowTextW(d.headings[j],(std::wstring(names[j])+(centimetres?L", см":L", м")).c_str());
@@ -213,6 +211,14 @@ void manualDialogSelfTest(ManualDialog& d){
   capture(L"manual-centimetres.png");bool themeBefore=lightTheme;applyTheme(true);RedrawWindow(d.window,nullptr,nullptr,RDW_INVALIDATE|RDW_ALLCHILDREN|RDW_UPDATENOW);capture(L"manual-light.png");applyTheme(themeBefore);
   SendDlgItemMessageW(d.window,MANUAL_UNITS,CB_SETCURSEL,0,0);SendMessageW(d.window,WM_COMMAND,MAKEWPARAM(MANUAL_UNITS,CBN_SELCHANGE),0);
   if(d.centimetres||std::abs(d.result.mean-12)>1e-10||manualVolume::dimension(d.rows[0][0])!=5)throw std::runtime_error("Metre conversion failed");
+  auto roundtripSaved=d.rows;d.rows={{L"5.05",L"2.31",L"1.36"},{L"5",L"2.2",L"1.4"},{L"5.25",L"2.25",L"1.3"},{},{}};manualRebuild(d);auto roundtripRows=d.rows;double roundtripVolume=d.result.mean;
+  for(int cycle=0;cycle<20;++cycle){
+   SendDlgItemMessageW(d.window,MANUAL_UNITS,CB_SETCURSEL,1,0);SendMessageW(d.window,WM_COMMAND,MAKEWPARAM(MANUAL_UNITS,CBN_SELCHANGE),0);
+   if(d.rows[0][0]!=L"505"||d.rows[0][1]!=L"231"||d.rows[0][2]!=L"136"||std::abs(d.result.mean-roundtripVolume)>1e-12)throw std::runtime_error("Rounded centimetre values or volume changed");
+   SendDlgItemMessageW(d.window,MANUAL_UNITS,CB_SETCURSEL,0,0);SendMessageW(d.window,WM_COMMAND,MAKEWPARAM(MANUAL_UNITS,CBN_SELCHANGE),0);
+   if(d.rows!=roundtripRows||std::abs(d.result.mean-roundtripVolume)>1e-12)throw std::runtime_error("Decimal roundtrip changed dimensions or volume");
+  }
+  capture(L"manual-roundtrip.png");d.rows=roundtripSaved;manualRebuild(d);
   SendMessageW(d.window,WM_COMMAND,MANUAL_ADD,0);if(d.rows.size()!=6||d.result.count!=5)throw std::runtime_error("Add blank row failed");
   SendMessageW(d.table,WM_COMMAND,MAKEWPARAM(2001,BN_CLICKED),(LPARAM)d.widgets[1].remove);if(d.rows.size()!=5||d.result.count!=4||d.result.mean!=11.25)throw std::runtime_error("Delete selected row failed");
   SetWindowTextW(d.widgets[0].edits[1],L"0");if(d.result.error.empty())throw std::runtime_error("Invalid dimension accepted");SetWindowTextW(d.widgets[0].edits[1],L"2");

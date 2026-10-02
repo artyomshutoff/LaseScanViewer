@@ -19,6 +19,23 @@ inline std::optional<double> dimension(std::wstring text){
  std::wistringstream input(text);input.imbue(std::locale::classic());double value=0;
  input>>value;if(input.fail()||!input.eof()||!std::isfinite(value)||value<=0)return {};return value;
 }
+// Metres <-> centimetres is a decimal-point shift, not binary floating-point
+// multiplication. Keep the entered decimal precision and never generate a
+// 5.049999... suffix merely by switching units.
+inline std::optional<std::wstring> convertDimension(std::wstring text,bool toCentimetres){
+ if(!dimension(text))return {};
+ auto first=text.find_first_not_of(L" \t\r\n"),last=text.find_last_not_of(L" \t\r\n");text=text.substr(first,last-first+1);
+ std::replace(text.begin(),text.end(),L',',L'.');auto dot=text.find(L'.');
+ int position=dot==std::wstring::npos?int(text.size()):int(dot);
+ if(dot!=std::wstring::npos)text.erase(dot,1);
+ auto significant=text.find_first_not_of(L'0');if(significant==std::wstring::npos)return {};
+ position-=int(significant);text.erase(0,significant);position+=toCentimetres?2:-2;
+ if(position<=0)text=L"0."+std::wstring(size_t(-position),L'0')+text;
+ else if(position>=int(text.size()))text.append(size_t(position-int(text.size())),L'0');
+ else text.insert(size_t(position),L".");
+ if(text.find(L'.')!=std::wstring::npos){while(text.back()==L'0')text.pop_back();if(text.back()==L'.')text.pop_back();}
+ if(!dimension(text))return {};return text;
+}
 struct Result {
  size_t count=0,invalidRow=0;std::array<double,3> dimensions{};
  double mean=0,minimum=0,maximum=0;std::string error;

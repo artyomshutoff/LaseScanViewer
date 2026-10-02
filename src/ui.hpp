@@ -2,20 +2,34 @@
 #include "logo.hpp"
 // Native GDI controls: no UI runtime or assets required beside the executable.
 COLORREF bg=RGB(239,241,243),panel=RGB(225,230,233),card=RGB(250,251,252),muted=RGB(76,94,106),ink=RGB(26,42,51),accent=RGB(0,112,38),border=RGB(173,184,190),activeBg=RGB(213,234,201),hoverBg=RGB(229,239,220);
+void refreshCaptionTheme(HWND window){
+ if(!window)return;
+ // Windows 10 can retain the previous DWM caption until nonclient activation
+ // is refreshed. These messages repaint the frame only; they neither activate
+ // the window nor move keyboard focus. Restore the actual activation state.
+ if(IsWindowVisible(window)&&!IsIconic(window)){
+  BOOL active=GetActiveWindow()==window;
+  SendMessageW(window,WM_NCACTIVATE,!active,0);
+  SendMessageW(window,WM_NCACTIVATE,active,0);
+ }
+ RedrawWindow(window,nullptr,nullptr,RDW_INVALIDATE|RDW_ERASE|RDW_FRAME|RDW_ALLCHILDREN|RDW_UPDATENOW);
+ // Commit the updated nonclient surface before returning to the menu loop.
+ if(HMODULE dwm=LoadLibraryW(L"dwmapi.dll")){using Flush=HRESULT(WINAPI*)();auto flush=(Flush)GetProcAddress(dwm,"DwmFlush");if(flush)flush();FreeLibrary(dwm);}
+}
 void applyTheme(bool light){
  lightTheme=light;bg=light?RGB(239,241,243):RGB(12,16,23);panel=light?RGB(225,230,233):RGB(18,24,33);card=light?RGB(250,251,252):RGB(26,34,46);muted=light?RGB(76,94,106):RGB(133,150,171);ink=light?RGB(26,42,51):RGB(229,237,246);accent=light?RGB(0,112,38):RGB(77,219,190);border=light?RGB(173,184,190):RGB(43,54,69);activeBg=light?RGB(213,234,201):RGB(30,63,62);hoverBg=light?RGB(229,239,220):RGB(36,47,62);
  if(HMODULE dwm=LoadLibraryW(L"dwmapi.dll")){using SetAttribute=HRESULT(WINAPI*)(HWND,DWORD,LPCVOID,DWORD);auto set=(SetAttribute)GetProcAddress(dwm,"DwmSetWindowAttribute");BOOL dark=!light;if(set&&FAILED(set(mainWin,20,&dark,sizeof(dark))))set(mainWin,19,&dark,sizeof(dark));if(set){set(mainWin,35,&panel,sizeof(panel));set(mainWin,36,&ink,sizeof(ink));}FreeLibrary(dwm);}
- if(mainWin)SetWindowPos(mainWin,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED);
- if(mainWin)RedrawWindow(mainWin,nullptr,nullptr,RDW_INVALIDATE|RDW_ALLCHILDREN|RDW_FRAME);redraw();
+ redraw();refreshCaptionTheme(mainWin);
 }
 
 // Test capture includes the native caption; normal PNG export stays viewport-only.
-void saveCaptionTest(const std::filesystem::path& path){
- if(!v2TestMode)return;bool wasVisible=IsWindowVisible(mainWin);if(!wasVisible)ShowWindow(mainWin,SW_SHOWNOACTIVATE);RedrawWindow(mainWin,nullptr,nullptr,RDW_INVALIDATE|RDW_FRAME|RDW_UPDATENOW);Sleep(100);
+COLORREF saveCaptionTest(const std::filesystem::path& path,bool refresh=true){
+ if(!v2TestMode)return CLR_INVALID;bool wasVisible=IsWindowVisible(mainWin);if(!wasVisible)ShowWindow(mainWin,SW_SHOWNOACTIVATE);if(refresh){RedrawWindow(mainWin,nullptr,nullptr,RDW_INVALIDATE|RDW_FRAME|RDW_UPDATENOW);Sleep(100);}
  RECT r;GetWindowRect(mainWin,&r);int w=r.right-r.left,h=32;HDC dc=GetWindowDC(mainWin),mem=CreateCompatibleDC(dc);
  BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=w;info.bmiHeader.biHeight=-h;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;void* bits=nullptr;
  auto bitmap=CreateDIBSection(dc,&info,DIB_RGB_COLORS,&bits,nullptr,0);auto old=SelectObject(mem,bitmap);PrintWindow(mainWin,mem,2);GdiFlush();std::vector<uint8_t> rgb(size_t(w)*h*3);auto p=(uint8_t*)bits;
- for(size_t i=0;i<size_t(w)*h;i++){rgb[i*3]=p[i*4+2];rgb[i*3+1]=p[i*4+1];rgb[i*3+2]=p[i*4];}SelectObject(mem,old);DeleteObject(bitmap);DeleteDC(mem);ReleaseDC(mainWin,dc);if(!wasVisible)ShowWindow(mainWin,SW_HIDE);writeBytes(path,encodePng(w,h,rgb));
+ COLORREF captionColor=GetPixel(mem,w/2,12);
+ for(size_t i=0;i<size_t(w)*h;i++){rgb[i*3]=p[i*4+2];rgb[i*3+1]=p[i*4+1];rgb[i*3+2]=p[i*4];}SelectObject(mem,old);DeleteObject(bitmap);DeleteDC(mem);ReleaseDC(mainWin,dc);if(!wasVisible)ShowWindow(mainWin,SW_HIDE);writeBytes(path,encodePng(w,h,rgb));return captionColor;
 }
 HFONT smallFont,numberFont;
 void fill(HDC dc,RECT r,COLORREF c){SetDCBrushColor(dc,c);FillRect(dc,&r,(HBRUSH)GetStockObject(DC_BRUSH));}
