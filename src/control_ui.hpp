@@ -15,5 +15,18 @@ void drawControlComparison(){
  glColor3f(.06f,.09f,.12f);int top=16+int(lines.size())*21;glBegin(GL_QUADS);glVertex2i(viewW-maxWidth-30,8);glVertex2i(viewW-8,8);glVertex2i(viewW-8,top+8);glVertex2i(viewW-maxWidth-30,top+8);glEnd();
  glColor3f(.76f,.85f,.82f);glListBase(textList);for(size_t i=0;i<lines.size();i++){glRasterPos2i(viewW-widths[i]-18,top-17-int(i)*21);glCallLists(GLsizei(lines[i].size()),GL_UNSIGNED_SHORT,lines[i].data());}
 }
+void drawBedDimensions(){
+ if(!textList||!comparison)return;
+ double scale=comparison->options.metresPerUnit;
+ std::vector<std::wstring> lines{L"Кузов · внутренние размеры по Empty",
+  L"Длина: "+num(bedDimensions.length*scale,2)+L" м",
+  L"Ширина: "+num(bedDimensions.width*scale,2)+L" м",
+  L"Высота до бортов: "+num(bedDimensions.height*scale,2)+L" м"};
+ if(!bedDimensions.available)lines={L"Размеры кузова: недостаточно",L"данных Empty для оценки"};
+ else if(scale<=0)lines={L"Размеры кузова: задайте",L"масштаб координат в настройках"};
+ glDisable(GL_DEPTH_TEST);glMatrixMode(GL_PROJECTION);glLoadIdentity();glOrtho(0,viewW,0,viewH,-1,1);glMatrixMode(GL_MODELVIEW);glLoadIdentity();
+ glColor3f(.035f,.055f,.075f);glBegin(GL_QUADS);glVertex2i(8,8);glVertex2i(305,8);glVertex2i(305,105);glVertex2i(8,105);glEnd();
+ glColor3f(.7f,.81f,.82f);glListBase(textList);for(size_t i=0;i<lines.size();++i){glRasterPos2i(18,84-int(i)*21);glCallLists(GLsizei(lines[i].size()),GL_UNSIGNED_SHORT,lines[i].data());}
+}
 void loadControlDatabase(const std::filesystem::path& path){controlDatabase.load(path);status(L"База загружена · "+std::to_wstring(controlDatabase.ids.size())+L" записей · только сверка TotalVolume");redraw();}
 void openControlDatabase(){if(busy)return;wchar_t file[32768]{};OPENFILENAMEW o{};o.lStructSize=sizeof(o);o.hwndOwner=mainWin;o.lpstrFilter=L"База измерений SQ3\0*.sq3;*.sqlite;*.db\0Все файлы\0*.*\0";o.lpstrFile=file;o.nMaxFile=32768;o.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;if(GetOpenFileNameW(&o))loadControlDatabase(file);}

@@ -5,6 +5,7 @@
 std::string utf8(const std::wstring& s){int n=WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),nullptr,0,nullptr,nullptr);std::string out(n,0);WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),out.data(),n,nullptr,nullptr);return out;}
 std::wstring num(double v,int precision=3){std::wostringstream s;s.imbue(std::locale::classic());s<<std::fixed<<std::setprecision(precision)<<v;return s.str();}
 #include "control_ui.hpp"
+#include "manual_volume_ui.hpp"
 
 std::wstring waterSummary(){
     if(!water.available)return L"По бортам: "+widen(water.note);
@@ -144,7 +145,10 @@ void calculateComparison(){
     invalidateComparisonKeepingView();compileLists();volumeProgress=0;shownVolumeProgress=-1;
     volumeTask=std::async(std::launch::async,[a=documents[activeDocument].data,b=documents[baseDocument].data,r=region,o=compareOptions,t=cargoThreshold,l=cargoLargest,c=cargoClean]{
         ViewerVolumeResult result;result.volume=calculateVolume(a,b,r,o,t,l,c,[](int value){volumeProgress.store(value);});
-        result.water=waterFill(b,result.volume.comparison,result.volume.cargo);result.fullWater=waterAboveLoad(a,result.volume.comparison,result.water);result.tarp=virtualTarp(result.volume.cargo,result.water,&result.volume.comparison);return result;
+        result.water=waterFill(b,result.volume.comparison,result.volume.cargo);result.fullWater=waterAboveLoad(a,result.volume.comparison,result.water);result.tarp=virtualTarp(result.volume.cargo,result.water,&result.volume.comparison);
+        if(result.volume.comparison.region.enabled){auto whole=result.volume.comparison;whole.region={};result.dimensions=measureBed(waterFill(b,whole,result.volume.cargo));}
+        else result.dimensions=measureBed(result.water);
+        return result;
     });
     busy=true;EnableWindow(GetDlgItem(mainWin,OPEN),FALSE);SetTimer(mainWin,3,60,nullptr);status(L"Расчёт объёма: подготовка поверхностей…");redraw();
 }
@@ -156,7 +160,7 @@ void finishComparison(){
         return;
     }
     KillTimer(mainWin,3);busy=false;EnableWindow(GetDlgItem(mainWin,OPEN),TRUE);
-    try{auto result=volumeTask.get();comparison=std::move(result.volume.comparison);cargo=std::move(result.volume.cargo);water=std::move(result.water);fullWater=std::move(result.fullWater);tarp=std::move(result.tarp);
+    try{auto result=volumeTask.get();comparison=std::move(result.volume.comparison);cargo=std::move(result.volume.cargo);water=std::move(result.water);bedDimensions=result.dimensions;fullWater=std::move(result.fullWater);tarp=std::move(result.tarp);
         cargoView=true;differenceView=overlayView=mesh=false;compileLists();status(comparisonSummary());
     }catch(const std::exception& e){invalidateComparisonKeepingView();compileLists();status(L"Расчёт объёма не выполнен");
         if(!renderTestDir.empty())throw;
@@ -201,6 +205,7 @@ try{
     case REGION_SELECT:lockedFrame.reset();cargoView=false;overlayView=false;compileLists();selectRegion=true;selecting=false;yaw=pitch=0;zoom=1;panX=panY=0;status(L"Выделите область прямоугольником ЛКМ в виде сверху. Z можно задать в параметрах.");redraw();break;
     case REGION_CLEAR:applyRegion({});selectRegion=false;reset();status(L"Область сброшена. Показаны все точки.");break;
     case LOAD_DATABASE:openControlDatabase();break;
+    case MANUAL_CALC:manualCalculator();break;
     case UNLOAD_DATABASE:controlDatabase={};redraw();status(L"Контрольная база отключена");break;
     case OPTIONS:settingsMenu();break;
     case PNG_SAVE:{auto p=saveDialog(L"Изображение PNG\0*.png\0",L"png",loadedPath.stem().wstring()+L"_view.png");if(!p.empty()){writeBytes(p,capturePng());status(L"PNG сохранён: "+p.wstring());}}break;
@@ -209,7 +214,7 @@ try{
 }catch(const std::exception& e){MessageBoxW(mainWin,widen(e.what()).c_str(),L"LaseScanViewer",MB_ICONEXCLAMATION);}}
 
 void runV2Test(){try{
-    wchar_t title[1024];GetWindowTextW(mainWin,title,1024);if(GetMenu(mainWin)||std::wstring(title).find(L"[Version: 3.27.0]")==std::wstring::npos)throw std::runtime_error("Menu or version title failed");
+    wchar_t title[1024];GetWindowTextW(mainWin,title,1024);if(GetMenu(mainWin)||std::wstring(title).find(L"[Version: 3.30.0]")==std::wstring::npos)throw std::runtime_error("Menu or version title failed");
     if(!std::filesystem::exists(preferencesFile())&&lightTheme)throw std::runtime_error("Default theme must be dark");
     std::filesystem::create_directories(renderTestDir);
     if(documents.size()!=2)throw std::runtime_error("Multi-file queue did not load two documents");
@@ -284,6 +289,11 @@ void runV2Test(){try{
     compareOptions.aligned=true;compareOptions.metresPerUnit=.001;calculateComparison();while(busy){finishComparison();Sleep(10);}
     if(!comparison||comparison->cells.empty()||!std::isfinite(comparison->positive))throw std::runtime_error("Comparison failed");
     mesh=true;saveInterface(renderTestDir/L"cargo-surface.bmp");mesh=false;saveInterface(renderTestDir/L"cargo-points.bmp");if(cargo.cloud.points.empty())throw std::runtime_error("Empty cargo point cloud");exportPly(cargo.cloud,renderTestDir/L"cargo-points.ply",false);saveInterface(renderTestDir/L"comparison.bmp");writeBytes(renderTestDir/L"view.png",capturePng());writeReport(renderTestDir/L"report.html");exportPly(model,renderTestDir/L"selection.ply",false);exportPly(cargo.geometry,renderTestDir/L"cargo.ply",true);if(!cargoView||cargo.cells==0||cargo.volume<=0)throw std::runtime_error("Cargo extraction failed");
+    if(water.available&&!bedDimensions.available)throw std::runtime_error("Bed dimensions missing");
+    std::ofstream(renderTestDir/L"bed-dimensions.txt")<<bedDimensions.length<<" "<<bedDimensions.width<<" "<<bedDimensions.height;
+    {HDC dc=GetDC(mainWin);auto old=SelectObject(dc,font);wchar_t caption[80];GetWindowTextW(GetDlgItem(mainWin,MANUAL_CALC),caption,80);SIZE size;GetTextExtentPoint32W(dc,caption,int(wcslen(caption)),&size);RECT box;GetClientRect(GetDlgItem(mainWin,MANUAL_CALC),&box);SelectObject(dc,old);ReleaseDC(mainWin,dc);if(size.cx>box.right-16)throw std::runtime_error("Manual button label clipped");}
+    auto manualBefore=displayedVolume();auto manualFrame=currentViewBounds();float manualYaw=yaw,manualPitch=pitch,manualZoom=zoom;manualCalculator(1);
+    if(!std::filesystem::exists(renderTestDir/L"manual-ok.txt")||std::filesystem::exists(renderTestDir/L"manual-error.txt")||displayedVolume()!=manualBefore||yaw!=manualYaw||pitch!=manualPitch||zoom!=manualZoom||currentViewBounds().lo.x!=manualFrame.lo.x)throw std::runtime_error("Manual calculator failed or changed the scan");
     auto savedVolume=cargo.volume;auto savedPoints=cargo.cloud.points.size();yaw=37;pitch=28;zoom=1.6f;panX=.17f;panY=-.11f;render();auto before=currentViewBounds();float scaleBefore=orthoHeight;
     v2Command(CONTEXT_POINTS);render();auto after=currentViewBounds();if(yaw!=37||pitch!=28||zoom!=1.6f||panX!=.17f||panY!=-.11f||orthoHeight!=scaleBefore||before.lo.x!=after.lo.x||before.lo.y!=after.lo.y||before.lo.z!=after.lo.z||before.hi.x!=after.hi.x||before.hi.y!=after.hi.y||before.hi.z!=after.hi.z)throw std::runtime_error("Showing context changed camera");saveInterface(renderTestDir/L"cargo-context.bmp");writeBytes(renderTestDir/L"cargo-context.png",capturePng());writeReport(renderTestDir/L"context-report.html");mesh=true;saveInterface(renderTestDir/L"cargo-context-surface.bmp");mesh=false;v2Command(CONTEXT_POINTS);render();if(orthoHeight!=scaleBefore||zoom!=1.6f||panX!=.17f||panY!=-.11f||yaw!=37||pitch!=28)throw std::runtime_error("Hiding context changed camera");reset();if(cargo.volume!=savedVolume||cargo.cloud.points.size()!=savedPoints)throw std::runtime_error("Context view changed cargo analysis");
     auto summary=comparisonSummary();selectDocument(1);if(comparison||region.enabled||compareOptions.aligned)throw std::runtime_error("Stale analysis after switching files");selectDocument(0);if(model.points.size()!=originalCount)throw std::runtime_error("Original scan was modified");

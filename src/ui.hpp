@@ -32,7 +32,7 @@ void drawButton(HDC dc,RECT r,int id,bool down=false,bool focus=false){
     if(down)base=activeBg;
     roundBox(dc,r,enabled?base:panel,active?selected:border);
     wchar_t text[180]{};GetWindowTextW(GetDlgItem(mainWin,id),text,180);
-    label(dc,{r.left+8,r.top,r.right-8,r.bottom},text,!enabled?RGB(77,89,106):id==OPEN?ink:active?selected:id==WATER?RGB(110,175,255):ink,font,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);
+    label(dc,{r.left+8,r.top,r.right-8,r.bottom},text,!enabled?RGB(77,89,106):id==OPEN?ink:active?selected:id==WATER?RGB(110,175,255):ink,id==LOAD_DATABASE?smallFont:font,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);
     if(focus){InflateRect(&r,-4,-4);DrawFocusRect(dc,&r);}
 }
 void drawFilePicker(HDC dc,RECT r,int id){
@@ -64,8 +64,8 @@ void drawPickerItem(DRAWITEMSTRUCT* d){
 void syncControls(){
     for(int id:{POINT_MODE,SURFACE,RESET,TOP,FRONT,SIDE,EXPORT,GRID,SMALL,LARGE})EnableWindow(GetDlgItem(mainWin,id),!model.points.empty()&&!busy);
     EnableWindow(GetDlgItem(mainWin,GROUP0),!busy&&(model.availableTypes&1));EnableWindow(GetDlgItem(mainWin,GROUP1),!busy&&(model.availableTypes&2));
-    for(int id=OPEN;id<=APPEARANCE;id++)if(HWND b=GetDlgItem(mainWin,id))InvalidateRect(b,nullptr,FALSE);
-    EnableWindow(GetDlgItem(mainWin,OPTIONS),!busy);EnableWindow(GetDlgItem(mainWin,LOAD_DATABASE),!busy);
+    for(int id=OPEN;id<=MANUAL_CALC;id++)if(HWND b=GetDlgItem(mainWin,id))InvalidateRect(b,nullptr,FALSE);
+    EnableWindow(GetDlgItem(mainWin,OPTIONS),!busy);EnableWindow(GetDlgItem(mainWin,LOAD_DATABASE),!busy);EnableWindow(GetDlgItem(mainWin,MANUAL_CALC),!busy);
     for(int id:{REGION_SELECT,REGION_CLEAR,PNG_SAVE,REPORT_SAVE,CLOSE_FILE})EnableWindow(GetDlgItem(mainWin,id),!busy&&!model.points.empty());
     EnableWindow(GetDlgItem(mainWin,AUTO_ALIGN),!busy&&documents.size()>1);
     EnableWindow(GetDlgItem(mainWin,CARGO),!busy&&comparison.has_value());
@@ -141,7 +141,7 @@ void saveInterface(const std::filesystem::path& path){
     RECT r;GetClientRect(mainWin,&r);BITMAPINFO bi{};bi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);bi.bmiHeader.biWidth=r.right;bi.bmiHeader.biHeight=-r.bottom;bi.bmiHeader.biPlanes=1;bi.bmiHeader.biBitCount=32;
     void* bits=nullptr;HDC dc=CreateCompatibleDC(nullptr);HBITMAP bmp=CreateDIBSection(dc,&bi,DIB_RGB_COLORS,&bits,nullptr,0);auto old=SelectObject(dc,bmp);
     paintPanel(dc);
-    for(int id=OPEN;id<=APPEARANCE;id++){HWND b=GetDlgItem(mainWin,id);if(!b)continue;RECT q;GetWindowRect(b,&q);MapWindowPoints(nullptr,mainWin,(POINT*)&q,2);if(id==ACTIVE_FILE||id==BASE_FILE)drawFilePicker(dc,q,id);else drawButton(dc,q,id);}
+    for(int id=OPEN;id<=MANUAL_CALC;id++){HWND b=GetDlgItem(mainWin,id);if(!b)continue;RECT q;GetWindowRect(b,&q);MapWindowPoints(nullptr,mainWin,(POINT*)&q,2);if(id==ACTIVE_FILE||id==BASE_FILE)drawFilePicker(dc,q,id);else drawButton(dc,q,id);}
     wchar_t text[1024]{};GetWindowTextW(statusWin,text,1024);label(dc,{24,r.bottom-29,r.right-24,r.bottom-7},text,muted);
     if(!model.points.empty()){
         render();glFinish();glReadBuffer(GL_FRONT);glPixelStorei(GL_PACK_ALIGNMENT,4);int stride=(viewW*3+3)&~3;std::vector<unsigned char> pixels(size_t(stride)*viewH);glReadPixels(0,0,viewW,viewH,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());

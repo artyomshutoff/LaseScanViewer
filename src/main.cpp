@@ -19,7 +19,7 @@ Model model; std::filesystem::path loadedPath,pendingPath; std::future<Model> lo
 std::filesystem::path renderTestDir;
 bool busy=false,mesh=false,grid=false; float yaw=160,pitch=45,zoom=1,panX=0,panY=0,pointSize=1,orthoHeight=1;
 POINT mouse{}; int dragging=0; GLuint pointList=0,faceList=0,textList=0,bigTextList=0; int viewW=1,viewH=1;
-constexpr wchar_t applicationTitle[]=L"LaseScanViewer [Version: 3.27.0]";
+constexpr wchar_t applicationTitle[]=L"LaseScanViewer [Version: 3.30.0]";
 constexpr int OPEN=101,POINT_MODE=102,SURFACE=103,RESET=104,TOP=105,FRONT=106,SIDE=107,EXPORT=108,GRID=109,SMALL=110,LARGE=111,GROUP0=112,GROUP1=113;
 #include "v2_state.hpp"
 std::wstring widen(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),nullptr,0);std::wstring w(n,0);MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),w.data(),n);return w;}
@@ -116,7 +116,7 @@ void render(){
         auto text=label.str();glColor3f(.3f,.7f,1.f);glRasterPos2i(14,viewH-94);glListBase(textList);glCallLists(GLsizei(text.size()),GL_UNSIGNED_SHORT,text.data());}
     if(scanLayers.enabled&&scanLayers.tarp&&tarp.available&&textList&&scanLayers.label){glDisable(GL_DEPTH_TEST);glMatrixMode(GL_PROJECTION);glLoadIdentity();glOrtho(0,viewW,0,viewH,-1,1);glMatrixMode(GL_MODELVIEW);glLoadIdentity();std::wostringstream label;label<<L"Тент · над бортами: "<<std::fixed<<std::setprecision(2)<<tarp.volume*std::pow(compareOptions.metresPerUnit>0?compareOptions.metresPerUnit:1,3)<<(compareOptions.metresPerUnit>0?L" м³":L" ед.³");auto text=label.str();glColor3f(.39f,.78f,.36f);glRasterPos2i(14,viewH-118);glListBase(textList);glCallLists(GLsizei(text.size()),GL_UNSIGNED_SHORT,text.data());}
     if(selecting){glDisable(GL_DEPTH_TEST);glMatrixMode(GL_PROJECTION);glLoadIdentity();glOrtho(0,viewW,viewH,0,-1,1);glMatrixMode(GL_MODELVIEW);glLoadIdentity();glColor3f(1,.8f,.2f);glBegin(GL_LINE_LOOP);glVertex2i(selectionStart.x,selectionStart.y);glVertex2i(selectionEnd.x,selectionStart.y);glVertex2i(selectionEnd.x,selectionEnd.y);glVertex2i(selectionStart.x,selectionEnd.y);glEnd();}
-    drawControlComparison();
+    drawBedDimensions();drawControlComparison();
     SwapBuffers(glDC);
 }
 void saveFrame(const std::filesystem::path& path){
@@ -178,6 +178,7 @@ LRESULT CALLBACK MainProc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
     case WM_KEYDOWN:if(wp==VK_ESCAPE){selecting=selectRegion=false;ReleaseCapture();redraw();}else if(wp=='O'&&(GetKeyState(VK_CONTROL)&0x8000))openFile();else if(wp=='S'&&(GetKeyState(VK_CONTROL)&0x8000))saveFile();else if(wp=='R'||wp==VK_HOME)reset();else if(wp=='1')command(POINT_MODE);else if(wp=='2')command(SURFACE);return 0;
     case WM_TIMER:if(wp==3){finishComparison();return 0;}if(wp==2){finishAlignment();return 0;}if(busy && loading.wait_for(std::chrono::seconds(0))==std::future_status::ready){KillTimer(w,1);busy=false;EnableWindow(GetDlgItem(w,OPEN),TRUE);try{auto next=loading.get();acceptLoaded(std::move(next));if(!renderTestDir.empty()&&loadQueue.empty())PostMessageW(w,v2TestMode?WM_APP+2:WM_APP+1,0,0);SetWindowTextW(w,(std::wstring(applicationTitle)+L" — "+loadedPath.filename().wstring()).c_str());status(L"Скан открыт   ·   "+grouped(model.points.size())+L" точек   ·   Геометрия в исходных координатах");}catch(const std::exception& e){status(L"Не удалось открыть BIN. Выберите файл поддерживаемого формата.");MessageBoxW(w,(L"Не удалось прочитать файл.\nПоддерживается проверенная структура LASE Full/Empty/Reference.\n\n"+widen(e.what())).c_str(),L"Ошибка чтения",MB_ICONERROR);}redraw();if(!loadQueue.empty()){auto p=loadQueue.front();loadQueue.pop_front();startLoad(p);}}return 0;
     case WM_APP+2:runV2Test();DestroyWindow(w);return 0;
+    case WM_APP+3:manualCalculator(1);DestroyWindow(w);return 0;
     case WM_APP+1:try{std::filesystem::create_directories(renderTestDir);mesh=false;syncControls();saveInterface(renderTestDir/L"interface.bmp");saveFrame(renderTestDir/L"points.bmp");mesh=true;saveFrame(renderTestDir/L"surface.bmp");exportPly(model,renderTestDir/L"model.ply",true);Model saved=std::move(model);auto savedDocuments=std::move(documents);documents.clear();updateFileLists();model=Model{};mesh=false;status(L"Готово   ·   Откройте BIN-файл или перетащите его в окно");syncControls();saveInterface(renderTestDir/L"empty.bmp");model=std::move(saved);documents=std::move(savedDocuments);updateFileLists();syncControls();SetWindowPos(w,nullptr,0,0,1120,780,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);saveInterface(renderTestDir/L"compact.bmp");std::ofstream(renderTestDir/L"render-ok.txt")<<"OpenGL points and surface rendered successfully";}catch(const std::exception& e){std::ofstream(renderTestDir/L"render-error.txt")<<e.what();}DestroyWindow(w);return 0;
     case WM_DROPFILES:{HDROP d=(HDROP)wp;wchar_t p[32768];std::vector<std::filesystem::path> paths;for(UINT i=0;i<DragQueryFileW(d,0xffffffff,nullptr,0);i++)if(DragQueryFileW(d,i,p,32768))paths.emplace_back(p);DragFinish(d);enqueueFiles(paths);return 0;}
     case WM_DESTROY:if(glRC){wglMakeCurrent(nullptr,nullptr);wglDeleteContext(glRC);ReleaseDC(viewWin,glDC);}DeleteObject(font);DeleteObject(titleFont);DeleteObject(smallFont);DeleteObject(numberFont);PostQuitMessage(0);return 0;
@@ -204,7 +205,7 @@ int WINAPI wWinMain(HINSTANCE inst,HINSTANCE,PWSTR,int show){
     button(CONTEXT_POINTS,L"Остальные точки",20,514,260,36);
     button(SMALL,L"−",200,558,36,32);button(LARGE,L"+",244,558,36,32);
     button(EXPORT,L"Экспортировать PLY",20,800,260,40);
-    button(LOAD_DATABASE,L"Загрузить базу SQ3",20,606,260,34);
+    button(LOAD_DATABASE,L"База SQ3",20,606,78,34);button(MANUAL_CALC,L"Обмеры кузова",106,606,174,34);
     createV2Controls(inst);
     viewWin=CreateWindowW(L"Lase3DView",L"3D",WS_CHILD|WS_CLIPSIBLINGS,320,88,1000,750,mainWin,nullptr,inst,nullptr);
     statusWin=CreateWindowW(L"STATIC",L"Готово   ·   Откройте BIN-файл или перетащите его в окно",WS_CHILD|WS_VISIBLE,12,780,1250,24,mainWin,nullptr,inst,nullptr);SendMessageW(statusWin,WM_SETFONT,(WPARAM)font,TRUE);
@@ -213,6 +214,6 @@ int WINAPI wWinMain(HINSTANCE inst,HINSTANCE,PWSTR,int show){
     wglMakeCurrent(glDC,glRC);HFONT overlayFont=CreateFontW(-15,0,0,0,FW_BOLD,FALSE,FALSE,FALSE,ANSI_CHARSET,0,0,NONANTIALIASED_QUALITY,0,L"Arial");HGDIOBJ previousFont=SelectObject(glDC,overlayFont);textList=glGenLists(1280);if(!wglUseFontBitmapsW(glDC,0,1280,textList)){glDeleteLists(textList,1280);textList=0;}SelectObject(glDC,previousFont);DeleteObject(overlayFont);HFONT volumeFont=CreateFontW(-30,0,0,0,FW_BOLD,FALSE,FALSE,FALSE,ANSI_CHARSET,0,0,ANTIALIASED_QUALITY,0,L"Segoe UI");previousFont=SelectObject(glDC,volumeFont);bigTextList=glGenLists(1280);if(!wglUseFontBitmapsW(glDC,0,1280,bigTextList)){glDeleteLists(bigTextList,1280);bigTextList=0;}SelectObject(glDC,previousFont);DeleteObject(volumeFont);
     loadPreferences();applyTheme(lightTheme);
     ShowWindow(mainWin,show);RECT rc;GetClientRect(mainWin,&rc);SendMessageW(mainWin,WM_SIZE,0,MAKELPARAM(rc.right,rc.bottom));UpdateWindow(mainWin);
-    int argc=0;LPWSTR* argv=CommandLineToArgvW(GetCommandLineW(),&argc);if(argc>3&&std::wstring(argv[1])==L"--pair-test"){v2TestMode=true;enqueueFiles({argv[2]});renderTestDir=argv[3];}else if(argc>4&&std::wstring(argv[1])==L"--v2-test"){v2TestMode=true;renderTestDir=argv[4];enqueueFiles({argv[2],argv[3]});}else if(argc>3 && std::wstring(argv[1])==L"--render-test"){renderTestDir=argv[3];startLoad(argv[2]);}else if(argc>1)enqueueFiles({argv[1]});LocalFree(argv);
+    int argc=0;LPWSTR* argv=CommandLineToArgvW(GetCommandLineW(),&argc);if(argc>2&&std::wstring(argv[1])==L"--manual-test"){v2TestMode=true;renderTestDir=argv[2];PostMessageW(mainWin,WM_APP+3,0,0);}else if(argc>3&&std::wstring(argv[1])==L"--pair-test"){v2TestMode=true;enqueueFiles({argv[2]});renderTestDir=argv[3];}else if(argc>4&&std::wstring(argv[1])==L"--v2-test"){v2TestMode=true;renderTestDir=argv[4];enqueueFiles({argv[2],argv[3]});}else if(argc>3 && std::wstring(argv[1])==L"--render-test"){renderTestDir=argv[3];startLoad(argv[2]);}else if(argc>1)enqueueFiles({argv[1]});LocalFree(argv);
     MSG msg;while(GetMessageW(&msg,nullptr,0,0)>0){if(msg.message==WM_KEYDOWN&&(msg.wParam==VK_ESCAPE||msg.wParam=='R'||msg.wParam==VK_HOME||msg.wParam=='1'||msg.wParam=='2'||((msg.wParam=='O'||msg.wParam=='S')&&(GetKeyState(VK_CONTROL)&0x8000)))){SendMessageW(mainWin,msg.message,msg.wParam,msg.lParam);continue;}if(!IsDialogMessageW(mainWin,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}}return 0;
 }
