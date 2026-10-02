@@ -34,14 +34,16 @@ inline std::array<BedAnchor,36> bedAnchors(const Model& active,const Model& base
         if(surrounded)eroded.insert(k);
     }
     size_t index=0;
+    PreparedBaseTransform prepared(c.options);
     for(int band:{0,1})for(double divisor:{60.,100.,160.}){
         double step=span/divisor;
         std::map<CellKey,std::vector<double>> a,b;std::vector<double> heights;
+        OrderedCellLookup<std::vector<double>> aLookup(a,active.points.size()),bLookup(b,base.points.size());
         auto allowed=[&](Point p){auto k=c.key(p);return expanded.count(k)&&(!band||!eroded.count(k));};
         for(auto p:active.points)if(allowed(p))
-            a[{int(std::floor(p.x/step)),int(std::floor(p.y/step))}].push_back(p.z);
-        for(auto p:base.points){p=transformBase(p,c.options);if(allowed(p)){
-            b[{int(std::floor(p.x/step)),int(std::floor(p.y/step))}].push_back(p.z);heights.push_back(p.z);
+            aLookup({int(std::floor(p.x/step)),int(std::floor(p.y/step))}).push_back(p.z);
+        for(auto p:base.points){p=prepared(p);if(allowed(p)){
+            bLookup({int(std::floor(p.x/step)),int(std::floor(p.y/step))}).push_back(p.z);heights.push_back(p.z);
         }}
         for(auto& kv:a)std::sort(kv.second.begin(),kv.second.end());
         for(auto& kv:b)std::sort(kv.second.begin(),kv.second.end());

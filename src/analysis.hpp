@@ -38,6 +38,15 @@ struct PreparedBaseTransform {
     Point operator()(Point p)const{return {float(c*p.x-s*p.y+dx),float(s*p.x+c*p.y+dy),float(p.z+dz)};}
 };
 using CellKey=std::pair<int,int>;
+// Consecutive scan points often share a cell. Reuse that lookup without an
+// extra hash index; the ordered owner and sample/sum order remain unchanged.
+template<class Value> struct OrderedCellLookup {
+    std::map<CellKey,Value>& grid;CellKey previous{};Value* recent=nullptr;
+    explicit OrderedCellLookup(std::map<CellKey,Value>& g,size_t):grid(g){}
+    Value& operator()(CellKey key){if(recent&&key==previous)return *recent;previous=key;
+        recent=&grid[key];
+        return *recent;}
+};
 struct HeightCell {
     double sum=0,lo=0,hi=0;size_t count=0;std::vector<double> samples;
     void add(double z){if(!count)lo=hi=z;lo=std::min(lo,z);hi=std::max(hi,z);sum+=z;++count;samples.push_back(z);}
@@ -52,6 +61,7 @@ struct DifferenceCell {double active=0,base=0,delta=0,area=0;bool reconstructed=
 struct Comparison {
     Region region;CompareOptions options;
     double requestedStep=0;bool adaptiveGridUsed=false;
+    bool refinementRejected=false;
     bool sensitivityChecked=false;double sensitivityMin=0,sensitivityMax=0;std::string warning;
     bool datumSensitivityChecked=false;double datumSensitivityMin=0,datumSensitivityMax=0;
     std::map<CellKey,DifferenceCell> cells;
@@ -68,16 +78,17 @@ inline Comparison compareClouds(const Model& active,const Model& base,Region roi
         options.provisional=true;
     }
     if(!std::isfinite(options.angle)||!std::isfinite(options.step)||options.step<=0||!std::isfinite(options.dx)||!std::isfinite(options.dy)||!std::isfinite(options.dz)||!std::isfinite(options.metresPerUnit)||options.metresPerUnit<0||options.estimator<0||options.estimator>4)throw std::runtime_error("Invalid comparison settings");
-    if(!roi.enabled){Point lo=active.lo,hi=active.hi;for(auto p:base.points){p=transformBase(p,options);lo.x=std::min(lo.x,p.x);lo.y=std::min(lo.y,p.y);hi.x=std::max(hi.x,p.x);hi.y=std::max(hi.y,p.y);}roi={true,lo.x,hi.x,lo.y,hi.y,-std::numeric_limits<double>::max(),std::numeric_limits<double>::max()};}
+    PreparedBaseTransform prepared(options);
+    if(!roi.enabled){Point lo=active.lo,hi=active.hi;for(auto p:base.points){p=prepared(p);lo.x=std::min(lo.x,p.x);lo.y=std::min(lo.y,p.y);hi.x=std::max(hi.x,p.x);hi.y=std::max(hi.y,p.y);}roi={true,lo.x,hi.x,lo.y,hi.y,-std::numeric_limits<double>::max(),std::numeric_limits<double>::max()};}
     roi.validate();double nx=std::ceil((roi.x1-roi.x0)/options.step),ny=std::ceil((roi.y1-roi.y0)/options.step);
     if(nx<1||ny<1||nx>1000000||ny>1000000||nx*ny>1000000)throw std::runtime_error("Grid exceeds 1 million cells: increase cell size or reduce region");
     Comparison result;result.region=roi;result.options=options;result.totalArea=(roi.x1-roi.x0)*(roi.y1-roi.y0);
     if(options.registrationFocused)result.warning="При совмещении исключён окружающий фон; проверьте положение кузова.";
     if(!options.aligned)result.warning+="Совмещение ненадёжно: объём рассчитан предварительно по найденному повороту и сдвигу. Проверьте наложение кузова.";
-    PreparedBaseTransform prepared(options);
     auto build=[&](const Model& m,bool shift){std::map<CellKey,HeightCell> grid;
+        OrderedCellLookup<HeightCell> lookup(grid,m.points.size());
         for(auto p:m.points){if(shift){p=prepared(p);}if(!roi.contains(p))continue;
-            auto k=result.key(p);k.first=std::min(k.first,int(nx)-1);k.second=std::min(k.second,int(ny)-1);grid[k].add(p.z);}
+            auto k=result.key(p);k.first=std::min(k.first,int(nx)-1);k.second=std::min(k.second,int(ny)-1);lookup(k).add(p.z);}
         return grid;
     };
     auto a=build(active,false),b=build(base,true);result.activeCells=a.size();result.baseCells=b.size();

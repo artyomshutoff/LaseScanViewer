@@ -10,6 +10,7 @@
 #include <atomic>
 #include <thread>
 #include <chrono>
+#include "parallel_work.hpp"
 
 namespace registration {
 inline double coord(Point p,int axis){return axis==0?p.x:axis==1?p.y:p.z;}
@@ -20,7 +21,21 @@ struct Tree {
     mutable std::shared_ptr<compute::TreeBuffers> gpuBuffers;
     int build(std::vector<Point>& p,int lo,int hi,int depth){if(lo>=hi)return -1;int mid=(lo+hi)/2,axis=depth%3;std::nth_element(p.begin()+lo,p.begin()+mid,p.begin()+hi,[axis](Point a,Point b){return coord(a,axis)<coord(b,axis);});int n=int(nodes.size());nodes.push_back({p[mid],-1,-1,axis});int l=build(p,lo,mid,depth+1),r=build(p,mid+1,hi,depth+1);nodes[n].left=l;nodes[n].right=r;return n;}
     explicit Tree(std::vector<Point> p){nodes.reserve(p.size());build(p,0,int(p.size()),0);}
-    void nearest(int i,Point p,double& best,Point& q)const{if(i<0)return;auto& n=nodes[i];double d=distance(p,n.p);if(d<best){best=d;q=n.p;}double split=coord(p,n.axis)-coord(n.p,n.axis);nearest(split<0?n.left:n.right,p,best,q);if(split*split<best)nearest(split<0?n.right:n.left,p,best,q);}
+    void nearest(int i,Point p,double& best,Point& q,int* matchIndex=nullptr)const{
+        // Balanced tree depth is at most 31 for the int-indexed node array.
+        // Deferred far branches retain the recursive traversal and strict tie
+        // rule; test their plane only after the near branch has improved best.
+        struct Branch{int node;double plane;};std::array<Branch,64> stack;size_t top=0;
+        if(nodes.empty())return;
+        for(;;){
+            while(i>=0){const auto& n=nodes[i];double d=distance(p,n.p);if(d<best||(matchIndex&&*matchIndex<0)){best=d;q=n.p;if(matchIndex)*matchIndex=i;}
+                double split=coord(p,n.axis)-coord(n.p,n.axis);int farNode=split<0?n.right:n.left;
+                if(farNode>=0)stack[top++]={farNode,split*split};i=split<0?n.left:n.right;
+            }
+            if(!top)break;auto branch=stack[--top];if(branch.plane<best)i=branch.node;
+        }
+    }
+    int nearestIndex(Point p)const{double d=std::numeric_limits<double>::infinity();Point q{};int index=-1;nearest(0,p,d,q,&index);return index;}
     std::pair<double,Point> nearest(Point p)const{double d=std::numeric_limits<double>::max();Point q{};nearest(0,p,d,q);return {d,q};}
     std::vector<std::pair<double,Point>> nearestBatch(const std::vector<Point>& points)const{std::vector<std::pair<double,Point>> hits;if(compute::nearestGPU(nodes,gpuBuffers,points,hits))return hits;hits.reserve(points.size());for(auto p:points)hits.push_back(nearest(p));return hits;}
 };
@@ -46,8 +61,11 @@ inline CompareOptions refinePrepared(const std::vector<RefineLevel>& levels,Comp
     for(const auto& level:levels){
         double voxel=level.voxel;const auto& a=level.a;const auto& b=level.b;const auto& at=level.at;const auto& bt=level.bt;
         if(a.size()<100||b.size()<100)continue;
+        struct Pair{Point p,q;double d;};std::vector<Pair> pairs;std::vector<double> residuals,weights,medianBuffer;
+        pairs.reserve(b.size());residuals.reserve(b.size());weights.reserve(b.size());medianBuffer.reserve(b.size());
+        auto median=[&](const std::vector<double>& v){medianBuffer.assign(v.begin(),v.end());auto mid=medianBuffer.begin()+medianBuffer.size()/2;std::nth_element(medianBuffer.begin(),mid,medianBuffer.end());return *mid;};
         for(int iteration=0;iteration<35;iteration++){
-            struct Pair{Point p,q;double d;};std::vector<Pair> pairs;std::vector<double> residuals;
+            pairs.clear();residuals.clear();weights.clear();
             double rad=o.angle*3.141592653589793/180,cs=std::cos(rad),sn=std::sin(rad);
             PreparedBaseTransform transform(o);
             for(auto original:b){Point p=transform(original);auto hit=at.nearest(p);if(hit.first>std::pow(voxel*3,2))continue;Point q=hit.second;
@@ -56,8 +74,8 @@ inline CompareOptions refinePrepared(const std::vector<RefineLevel>& levels,Comp
                 double d=std::sqrt(hit.first);pairs.push_back({p,q,d});residuals.push_back(d);
             }
             if(pairs.size()<80)break;
-            auto median=[](std::vector<double> v){auto mid=v.begin()+v.size()/2;std::nth_element(v.begin(),mid,v.end());return *mid;};double med=median(residuals);for(auto& v:residuals)v=std::abs(v-med);double cutoff=std::min(voxel*3,std::max(voxel*.6,med+2.5*1.4826*median(residuals)));
-            double sum=0,px=0,py=0,pz=0,qx=0,qy=0,qz=0;std::vector<double> weights;weights.reserve(pairs.size());
+            double med=median(residuals);for(auto& v:residuals)v=std::abs(v-med);double cutoff=std::min(voxel*3,std::max(voxel*.6,med+2.5*1.4826*median(residuals)));
+            double sum=0,px=0,py=0,pz=0,qx=0,qy=0,qz=0;
             for(auto m:pairs){double u=m.d/cutoff,w=u<1?std::pow(1-u*u,2):0;weights.push_back(w);sum+=w;px+=w*m.p.x;py+=w*m.p.y;pz+=w*m.p.z;qx+=w*m.q.x;qy+=w*m.q.y;qz+=w*m.q.z;}if(sum<30)break;px/=sum;py/=sum;pz/=sum;qx/=sum;qy/=sum;qz/=sum;
             double cross=0,dot=0;for(size_t i=0;i<pairs.size();i++){auto m=pairs[i];cross+=weights[i]*((m.p.x-px)*(m.q.y-qy)-(m.p.y-py)*(m.q.x-qx));dot+=weights[i]*((m.p.x-px)*(m.q.x-qx)+(m.p.y-py)*(m.q.y-qy));}
             double da=std::clamp(std::atan2(cross,dot),-.02,.02),c=std::cos(da),t=std::sin(da),dx=qx-c*px+t*py,dy=qy-t*px-c*py,dz=qz-pz,oldx=o.dx;
@@ -152,9 +170,14 @@ inline Result alignClouds(const Model& active,const Model& base,CompareOptions o
         if(finalists.size()==8)break;
     }
     auto refinementLevels=prepareRefinement(active,base,span);
+    if(progress)progress(85);
+    std::vector<Result> refinedFinalists(finalists.size());
+    // Each candidate reads the same prepared trees and owns its result. Merge
+    // in the original order to preserve tie-breaking and ambiguity checks.
+    parallelJobs(finalists.size(),[&](size_t i){refinedFinalists[i]=evaluate(refinePrepared(refinementLevels,finalists[i].options));});
     for(size_t i=0;i<finalists.size();++i){
         if(progress)progress(85+int(i*14/finalists.size()));
-        auto refined=evaluate(refinePrepared(refinementLevels,finalists[i].options));
+        auto refined=refinedFinalists[i];
         if(refined.score<finalists[i].score)finalists[i]=refined;
         if(finalists[i].score<best.score)best=finalists[i];
         candidates.push_back(finalists[i]);

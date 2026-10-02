@@ -7,6 +7,7 @@ int main(){
  auto a=surface(true),b=surface(false);CompareOptions o;o.step=1;o.aligned=true;Region roi{true,0,12,0,12,-1000,1000};
  b.points.erase(std::remove_if(b.points.begin(),b.points.end(),[](Point p){return int(p.x)==5&&int(p.y)==5;}),b.points.end());
  auto c=compareClouds(a,b,roi,o);equal(c.positive,288);equal(c.reconstructedArea,1);auto g=buildCargo(c,.1,true,&a,true,&b);equal(g.volume,288);equal(g.reconstructedVolume,2);
+ auto integral=buildCargo(c,.1,true,&a,true,&b,false);assert(integral.volume==g.volume&&integral.reconstructedVolume==g.reconstructedVolume&&integral.cells==g.cells&&integral.removedCells==g.removedCells&&integral.geometry.points.empty()&&integral.geometry.faces.empty()&&integral.cloud.points.empty());
  o.reconstructGaps=false;c=compareClouds(a,b,roi,o);equal(c.positive,286);equal(c.reconstructedArea,0);o.reconstructGaps=true;
  a.points.erase(std::remove_if(a.points.begin(),a.points.end(),[](Point p){return int(p.x)==5&&int(p.y)==5;}),a.points.end());c=compareClouds(a,b,roi,o);equal(c.positive,286);equal(c.reconstructedArea,0);
  a=surface(true);b=surface(false);b.points.erase(std::remove_if(b.points.begin(),b.points.end(),[](Point p){return p.x>=4&&p.x<8;}),b.points.end());c=compareClouds(a,b,roi,o);equal(c.reconstructedArea,0);equal(c.positive,192);

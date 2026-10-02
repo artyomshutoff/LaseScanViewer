@@ -39,6 +39,10 @@ int main(){
  calibrateVolume(da,db,changed,dm.cargo,false);assert(!dm.cargo.calibrated&&dm.cargo.calibratedVolume==0);
  changed=dm.comparison;changed.adaptiveGridUsed=false;
  calibrateVolume(da,db,changed,dm.cargo,false);assert(!dm.cargo.calibrated);
+ changed=dm.comparison;changed.refinementRejected=true;
+ dm.cargo.calibrated=true;dm.cargo.calibratedVolume=123;
+ calibrateVolume(da,db,changed,dm.cargo,false);assert(!dm.cargo.calibrated&&dm.cargo.calibratedVolume==0);
+ assert(dm.cargo.calibrationNote.find("Сетка неустойчива")!=std::string::npos);
  // Invalid / out-of-domain feature vectors must fall back without a stale value.
  changed=dm.comparison;dm.cargo.volume=1e9;
  calibrateVolume(da,db,changed,dm.cargo,false);assert(!dm.cargo.calibrated&&dm.cargo.calibratedVolume==0);

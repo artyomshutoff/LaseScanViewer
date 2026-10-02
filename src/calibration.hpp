@@ -11,6 +11,7 @@ inline void calibrateVolume(const Model& active,const Model& base,const Comparis
     cargo.calibrated=false;cargo.calibratedVolume=0;
     auto reject=[&](const char* reason){cargo.calibrationNote=reason;};
     if(!c.options.calibratedEstimate){reject("Калибровка отключена");return;}
+    if(c.refinementRejected){reject("Сетка неустойчива: показан геометрический объём без модельной поправки");return;}
     if(manualRegion||active.kind!=2||base.kind!=1||active.selectedType!=0||base.selectedType!=0||
        c.options.estimator!=4||!c.options.reconstructGaps||!c.adaptiveGridUsed||
        std::abs(c.requestedStep-100)>1e-8||std::abs(c.options.metresPerUnit-.001)>1e-10||

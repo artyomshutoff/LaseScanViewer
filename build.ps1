@@ -3,6 +3,7 @@ $ErrorActionPreference='Stop'
 Push-Location $PSScriptRoot
 try {
     New-Item -ItemType Directory -Force $OutputDir,'build' | Out-Null
+    & "$PSScriptRoot/scripts/build_web_assets.ps1"
     & "$Toolchain/bin/llvm-windres.exe" app.rc -O coff -o build/app.res
     if ($LASTEXITCODE) { throw 'Resource compilation failed' }
     & "$Toolchain/bin/clang.exe" -O2 -DSQLITE_OMIT_LOAD_EXTENSION -DSQLITE_DQS=0 -c src/vendor/sqlite/sqlite3.c -o build/sqlite-x64.o
@@ -16,6 +17,10 @@ try {
     if ($LASTEXITCODE) { throw 'x86 resource compilation failed' }
     & "$Toolchain/bin/i686-w64-mingw32-clang++.exe" -std=c++17 -O2 -Wall -Wextra -static -municode -mwindows src/main.cpp build/app-x86.res build/sqlite-x86.o -o "$OutputDir/LaseScanViewer-Portable.exe" -lcomctl32 -lopengl32 -lgdi32 -lcomdlg32 -lshell32 -luser32 -lole32 -lwindowscodecs -luuid
     if ($LASTEXITCODE) { throw 'Portable x86 build failed' }
+    & "$Toolchain/bin/clang++.exe" -std=c++17 -O2 -Wall -Wextra -static -municode -mwindows src/web_main.cpp build/app.res build/sqlite-x64.o -o "$OutputDir/LaseScanViewer-Web.exe" -lws2_32 -lbcrypt -lshell32 -luser32
+    if ($LASTEXITCODE) { throw 'Web viewer x64 build failed' }
+    & "$Toolchain/bin/i686-w64-mingw32-clang++.exe" -std=c++17 -O2 -Wall -Wextra -static -municode -mwindows src/web_main.cpp build/app-x86.res build/sqlite-x86.o -o "$OutputDir/LaseScanViewer-Web-Portable.exe" -lws2_32 -lbcrypt -lshell32 -luser32
+    if ($LASTEXITCODE) { throw 'Web viewer x86 build failed' }
     & "$Toolchain/bin/clang++.exe" -std=c++17 -O2 -Wall -Wextra -static -municode src/inspect.cpp -o build/inspect.exe
     if ($LASTEXITCODE) { throw 'Inspector build failed' }
 } finally { Pop-Location }

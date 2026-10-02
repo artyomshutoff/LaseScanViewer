@@ -1,0 +1,11 @@
+#include "../src/volume.hpp"
+#include <iomanip>
+#include <iostream>
+#include <sstream>
+#include <mutex>
+std::vector<std::string> columns(const std::string&s){std::vector<std::string> v;std::string item;std::istringstream in(s);while(std::getline(in,item,',')){if(item.size()>1&&item.front()=='"')item=item.substr(1,item.size()-2);v.push_back(item);}if(!s.empty()&&s.back()==',')v.emplace_back();return v;}
+int wmain(int argc,wchar_t**argv){if(argc<4)return 2;std::map<std::pair<std::string,int>,CompareOptions> poses;std::ifstream f(argv[2]);std::string line;std::getline(f,line);while(std::getline(f,line)){auto row=columns(line);if(row.size()<26||!row[25].empty())continue;CompareOptions o;o.angle=std::stod(row[11]);o.dx=std::stod(row[12]);o.dy=std::stod(row[13]);o.dz=std::stod(row[14]);o.aligned=true;poses[{row[0],std::stoi(row[1])}]=o;}
+std::ifstream manifest(argv[1]);std::vector<std::pair<std::string,std::filesystem::path>> paths;while(std::getline(manifest,line)){auto tab=line.find('\t');if(tab!=std::string::npos)paths.push_back({line.substr(0,tab),std::filesystem::u8path(line.substr(tab+1))});}std::ofstream out(argv[3]);out<<std::setprecision(17)<<"dataset,id,requested,fine,fine_all,ratio,coarse,fine_reconstructed\n";std::mutex lock;
+parallelJobs(paths.size(),[&](size_t i){auto [dataset,path]=paths[i];int id=std::stoi(path.filename().string().substr(0,10));auto found=poses.find({dataset,id});if(found==poses.end())return;auto a=readModel(path),b=readModel(path.parent_path()/(path.filename().string().substr(0,10)+"_Empty.bin"));auto o=found->second;std::array<double,3> volume{};double all=0,reconstructed=0;
+for(size_t j=0;j<3;++j){auto variant=o;variant.step=j==0?100:j==1?75:125;auto c=compareClouds(a,b,{},variant);auto cargo=buildCargo(c,50,true,nullptr,true,nullptr,false);volume[j]=cargo.volume;if(j==1){all=buildCargo(c,50,false,nullptr,true,nullptr,false).volume;reconstructed=cargo.reconstructedVolume;}}
+std::ostringstream row;row<<std::setprecision(17)<<'"'<<dataset<<'"'<<','<<id<<','<<volume[0]*1e-9<<','<<volume[1]*1e-9<<','<<all*1e-9<<','<<(volume[0]>0?volume[1]/volume[0]:1)<<','<<volume[2]*1e-9<<','<<reconstructed*1e-9;std::lock_guard<std::mutex>guard(lock);out<<row.str()<<'\n';out.flush();});}

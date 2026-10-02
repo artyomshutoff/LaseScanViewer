@@ -60,6 +60,6 @@ void layerSettings(int test=0){
 void settingsMenu(){
     HMENU menu=CreatePopupMenu();AppendMenuW(menu,MF_STRING|(activeDocument<0?MF_GRAYED:0),1,L"Слои просмотра…");AppendMenuW(menu,MF_STRING|(activeDocument<0?MF_GRAYED:0),2,L"Параметры расчёта…");AppendMenuW(menu,MF_SEPARATOR,0,nullptr);AppendMenuW(menu,MF_STRING,3,L"Устройство вычислений · CPU / GPU…");
     AppendMenuW(menu,MF_SEPARATOR,0,nullptr);AppendMenuW(menu,MF_STRING,MANUAL_CALC,L"Обмеры кузова · ручной калькулятор…");AppendMenuW(menu,MF_POPUP,(UINT_PTR)themeMenu(),L"Тема интерфейса");AppendMenuW(menu,MF_POPUP,(UINT_PTR)formatMenu(),L"Формат отчёта");AppendMenuW(menu,MF_STRING,LOAD_DATABASE,L"Загрузить контрольную базу SQ3…");AppendMenuW(menu,MF_STRING|(controlDatabase.path.empty()?MF_GRAYED:0),UNLOAD_DATABASE,L"Отключить контрольную базу");
-    RECT r;GetWindowRect(GetDlgItem(mainWin,OPTIONS),&r);int selected=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_LEFTALIGN|TPM_TOPALIGN,r.left,r.bottom,0,mainWin,nullptr);DestroyMenu(menu);
+    RECT r;GetWindowRect(mainControl(OPTIONS),&r);int selected=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_LEFTALIGN|TPM_TOPALIGN,r.left,r.bottom,0,mainWin,nullptr);DestroyMenu(menu);
     if(selected==1)layerSettings();else if(selected==2)settings();else if(selected==3)computeSettings();else if(selected>=LOAD_DATABASE)v2Command(selected);
 }

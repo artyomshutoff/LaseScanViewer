@@ -33,25 +33,26 @@ COLORREF saveCaptionTest(const std::filesystem::path& path,bool refresh=true){
 }
 HFONT smallFont,numberFont;
 void fill(HDC dc,RECT r,COLORREF c){SetDCBrushColor(dc,c);FillRect(dc,&r,(HBRUSH)GetStockObject(DC_BRUSH));}
-void roundBox(HDC dc,RECT r,COLORREF c,COLORREF border){SelectObject(dc,GetStockObject(DC_BRUSH));SelectObject(dc,GetStockObject(DC_PEN));SetDCBrushColor(dc,c);SetDCPenColor(dc,border);RoundRect(dc,r.left,r.top,r.right,r.bottom,4,4);}
+void roundBox(HDC dc,RECT r,COLORREF c,COLORREF border){SelectObject(dc,GetStockObject(DC_BRUSH));SelectObject(dc,GetStockObject(DC_PEN));SetDCBrushColor(dc,c);SetDCPenColor(dc,border);RoundRect(dc,r.left,r.top,r.right,r.bottom,12,12);}
 void label(HDC dc,RECT r,const std::wstring& s,COLORREF c=ink,HFONT f=nullptr,UINT flags=DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS){SelectObject(dc,f?f:font);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,c);DrawTextW(dc,s.c_str(),int(s.size()),&r,flags);}
 std::wstring grouped(size_t n){auto s=std::to_wstring(n);for(int i=int(s.size())-3;i>0;i-=3)s.insert(i,L" ");return s;}
 void drawButton(HDC dc,RECT r,int id,bool down=false,bool focus=false){
-    RECT controlRect{};GetWindowRect(GetDlgItem(mainWin,id),&controlRect);MapWindowPoints(nullptr,mainWin,(POINT*)&controlRect,2);fill(dc,r,controlRect.left<300?panel:bg);
+    if(sidebarLayerDraw(dc,r,id,focus))return;
+    RECT controlRect{};GetWindowRect(mainControl(id),&controlRect);MapWindowPoints(nullptr,mainWin,(POINT*)&controlRect,2);fill(dc,r,controlRect.left<300?panel:bg);
     bool active=!model.points.empty()&&((id==WATER&&(scanLayers.enabled?(scanLayers.emptyWater||scanLayers.fullWater):showWater))||(id==CONTEXT_POINTS&&(scanLayers.enabled?scanLayers.other:cargoView&&showContext))||(id==CARGO&&(scanLayers.enabled?scanLayers.cargo:cargoView))||(id==OVERLAY&&(scanLayers.enabled?scanLayers.full&&scanLayers.empty:overlayView))||(id==COMPARE&&differenceView)||(id==REGION_SELECT&&selectRegion)||(id==POINT_MODE&&!mesh)||(id==SURFACE&&mesh)||(id==GRID&&showZone)||(id==GROUP0&&model.selectedType==0&&!model.points.empty())||(id==GROUP1&&model.selectedType==1&&!model.points.empty()));
-    bool enabled=IsWindowEnabled(GetDlgItem(mainWin,id));
+    bool enabled=IsWindowEnabled(mainControl(id));
     COLORREF base=id==OPEN?activeBg:active?activeBg:card;
     COLORREF selected=id==WATER?RGB(65,145,255):accent;if(id==WATER&&active)base=RGB(23,44,80);
-    if(enabled&&GetPropW(GetDlgItem(mainWin,id),L"ScanHover")&&!active&&id!=OPEN)base=hoverBg;
+    if(enabled&&GetPropW(mainControl(id),L"ScanHover")&&!active&&id!=OPEN)base=hoverBg;
     if(down)base=activeBg;
     roundBox(dc,r,enabled?base:panel,active?selected:border);
-    wchar_t text[180]{};GetWindowTextW(GetDlgItem(mainWin,id),text,180);
+    wchar_t text[180]{};GetWindowTextW(mainControl(id),text,180);
     label(dc,{r.left+8,r.top,r.right-8,r.bottom},text,!enabled?RGB(77,89,106):id==OPEN?ink:active?selected:id==WATER?RGB(110,175,255):ink,id==LOAD_DATABASE?smallFont:font,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);
     if(focus){InflateRect(&r,-4,-4);DrawFocusRect(dc,&r);}
 }
 void drawFilePicker(HDC dc,RECT r,int id){
-    bool enabled=IsWindowEnabled(GetDlgItem(mainWin,id));fill(dc,r,bg);roundBox(dc,r,enabled?card:panel,GetFocus()==GetDlgItem(mainWin,id)?accent:border);
-    wchar_t text[32768]{};GetWindowTextW(GetDlgItem(mainWin,id),text,32768);
+    bool enabled=IsWindowEnabled(mainControl(id));fill(dc,r,bg);roundBox(dc,r,enabled?card:panel,GetFocus()==mainControl(id)?accent:border);
+    wchar_t text[32768]{};GetWindowTextW(mainControl(id),text,32768);
     std::wstring value=text[0]?text:id==ACTIVE_FILE?L"С грузом: выберите Full":L"Пустой кузов: выберите Empty";
     label(dc,{r.left+12,r.top,r.right-32,r.bottom},value,enabled&&text[0]?ink:muted,font);
     SelectObject(dc,GetStockObject(DC_PEN));SetDCPenColor(dc,enabled?muted:RGB(77,89,106));int x=r.right-17,y=(r.top+r.bottom)/2;
@@ -65,6 +66,7 @@ LRESULT CALLBACK PickerSkinProc(HWND w,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,
     (void)data;return result;
 }
 LRESULT CALLBACK ButtonSkinProc(HWND w,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR data){
+    if(msg==WM_SETFOCUS)sidebarEnsureVisible(w);
     if(msg==WM_MOUSEMOVE&&!GetPropW(w,L"ScanHover")){SetPropW(w,L"ScanHover",(HANDLE)1);TRACKMOUSEEVENT tracking{sizeof(tracking),TME_LEAVE,w,0};TrackMouseEvent(&tracking);InvalidateRect(w,nullptr,FALSE);}
     if(msg==WM_MOUSELEAVE){RemovePropW(w,L"ScanHover");InvalidateRect(w,nullptr,FALSE);}
     if(msg==WM_NCDESTROY){RemovePropW(w,L"ScanHover");RemoveWindowSubclass(w,ButtonSkinProc,id);}
@@ -76,35 +78,28 @@ void drawPickerItem(DRAWITEMSTRUCT* d){
     if(d->itemState&ODS_FOCUS)DrawFocusRect(d->hDC,&d->rcItem);
 }
 void syncControls(){
-    for(int id:{POINT_MODE,SURFACE,RESET,TOP,FRONT,SIDE,EXPORT,GRID,SMALL,LARGE})EnableWindow(GetDlgItem(mainWin,id),!model.points.empty()&&!busy);
-    EnableWindow(GetDlgItem(mainWin,GROUP0),!busy&&(model.availableTypes&1));EnableWindow(GetDlgItem(mainWin,GROUP1),!busy&&(model.availableTypes&2));
-    for(int id=OPEN;id<=MANUAL_CALC;id++)if(HWND b=GetDlgItem(mainWin,id))InvalidateRect(b,nullptr,FALSE);
-    EnableWindow(GetDlgItem(mainWin,OPTIONS),!busy);EnableWindow(GetDlgItem(mainWin,LOAD_DATABASE),!busy);EnableWindow(GetDlgItem(mainWin,MANUAL_CALC),!busy);
-    for(int id:{REGION_SELECT,REGION_CLEAR,PNG_SAVE,REPORT_SAVE,CLOSE_FILE})EnableWindow(GetDlgItem(mainWin,id),!busy&&!model.points.empty());
-    EnableWindow(GetDlgItem(mainWin,AUTO_ALIGN),!busy&&documents.size()>1);
-    EnableWindow(GetDlgItem(mainWin,CARGO),!busy&&comparison.has_value());
-    EnableWindow(GetDlgItem(mainWin,CONTEXT_POINTS),!busy&&comparison.has_value());
-    SetWindowTextW(GetDlgItem(mainWin,CARGO),cargoView&&showContext?L"Груз + фон":L"Только груз");
-    EnableWindow(GetDlgItem(mainWin,COMPARE),!busy&&documents.size()>1);EnableWindow(GetDlgItem(mainWin,OVERLAY),!busy&&documents.size()>1);EnableWindow(GetDlgItem(mainWin,ACTIVE_FILE),!busy&&!documents.empty());EnableWindow(GetDlgItem(mainWin,BASE_FILE),!busy&&!documents.empty());
+    for(int id:{POINT_MODE,SURFACE,RESET,TOP,FRONT,SIDE,EXPORT,GRID,SMALL,LARGE})EnableWindow(mainControl(id),!model.points.empty()&&!busy);
+    EnableWindow(mainControl(GROUP0),!busy&&(model.availableTypes&1));EnableWindow(mainControl(GROUP1),!busy&&(model.availableTypes&2));
+    for(int id=OPEN;id<=LAYER_TARP;id++)if(HWND b=mainControl(id))InvalidateRect(b,nullptr,FALSE);
+    EnableWindow(mainControl(WEB_VIEW),!busy);
+    EnableWindow(mainControl(OPTIONS),!busy);EnableWindow(mainControl(LOAD_DATABASE),!busy);EnableWindow(mainControl(MANUAL_CALC),!busy);
+    for(int id:{REGION_SELECT,REGION_CLEAR,PNG_SAVE,REPORT_SAVE,CLOSE_FILE})EnableWindow(mainControl(id),!busy&&!model.points.empty());
+    EnableWindow(mainControl(AUTO_ALIGN),!busy&&documents.size()>1);
+    EnableWindow(mainControl(CARGO),!busy&&comparison.has_value());
+    EnableWindow(mainControl(CONTEXT_POINTS),!busy&&comparison.has_value());
+    SetWindowTextW(mainControl(CARGO),cargoView&&showContext?L"Груз + фон":L"Только груз");
+    EnableWindow(mainControl(COMPARE),!busy&&documents.size()>1);EnableWindow(mainControl(OVERLAY),!busy&&documents.size()>1);EnableWindow(mainControl(ACTIVE_FILE),!busy&&!documents.empty());EnableWindow(mainControl(BASE_FILE),!busy&&!documents.empty());
+    sidebarSync();
     if(viewWin)ShowWindow(viewWin,model.points.empty()?SW_HIDE:SW_SHOW);
 }
 void layout(){
     RECT r;GetClientRect(mainWin,&r);
     MoveWindow(viewWin,320,174,std::max(1L,r.right-340),std::max(1L,r.bottom-322),TRUE);v2Layout();
     MoveWindow(statusWin,24,r.bottom-29,std::max(1L,r.right-48),22,TRUE);
-    MoveWindow(GetDlgItem(mainWin,EXPORT),20,r.bottom-82,260,40,TRUE);
+    sidebarLayout();
 }
 void paintPanel(HDC dc){
     RECT r;GetClientRect(mainWin,&r);fill(dc,r,bg);fill(dc,{0,0,300,r.bottom-40},panel);fill(dc,{300,0,301,r.bottom-40},border);
-    for(int top:{151,231,357,437})fill(dc,{16,top,284,top+1},border);
-    drawBrandLogo(dc,{20,16,174,54});
-    label(dc,{20,58,282,89},L"ScanViewer",ink,numberFont);
-    label(dc,{20,154,280,175},L"ОТОБРАЖЕНИЕ",muted,smallFont);
-    label(dc,{20,234,280,255},L"РАКУРС",muted,smallFont);
-    label(dc,{20,360,280,381},L"НАБОР ДАННЫХ",muted,smallFont);
-    label(dc,{20,440,280,461},L"ПАРАМЕТРЫ ВИДА",muted,smallFont);
-    if(r.bottom>820)label(dc,{20,650,280,694},controlDatabase.path.empty()?L"Контрольная база не загружена":L"SQ3 · "+std::to_wstring(controlDatabase.ids.size())+L" записей",muted,smallFont);
-    label(dc,{20,558,192,590},L"Размер точек · "+std::to_wstring(int(pointSize))+L" px",muted,smallFont);
     label(dc,{324,14,r.right-170,47},busy?L"Обработка сканов…":model.points.empty()?L"Просмотр 3D-сканов":loadedPath.filename().wstring(),ink,titleFont);
     label(dc,{325,48,r.right-180,74},model.points.empty()?L"Сравнение сканов и оценка объёма":L"Измерение "+std::to_wstring(model.scan)+L"   /   Набор "+std::to_wstring(model.selectedType)+L"   /   "+(scanLayers.enabled?L"Слои просмотра":cargoView?(showContext?L"Груз цветом · остальные точки серые":L"Только груз"):overlayView?L"Наложение":differenceView?L"Разность высот":mesh?L"Поверхность":L"Облако точек"),muted);
     roundBox(dc,{r.right-145,24,r.right-20,58},activeBg,border);
@@ -155,7 +150,8 @@ void saveInterface(const std::filesystem::path& path){
     RECT r;GetClientRect(mainWin,&r);BITMAPINFO bi{};bi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);bi.bmiHeader.biWidth=r.right;bi.bmiHeader.biHeight=-r.bottom;bi.bmiHeader.biPlanes=1;bi.bmiHeader.biBitCount=32;
     void* bits=nullptr;HDC dc=CreateCompatibleDC(nullptr);HBITMAP bmp=CreateDIBSection(dc,&bi,DIB_RGB_COLORS,&bits,nullptr,0);auto old=SelectObject(dc,bmp);
     paintPanel(dc);
-    for(int id=OPEN;id<=MANUAL_CALC;id++){HWND b=GetDlgItem(mainWin,id);if(!b)continue;RECT q;GetWindowRect(b,&q);MapWindowPoints(nullptr,mainWin,(POINT*)&q,2);if(id==ACTIVE_FILE||id==BASE_FILE)drawFilePicker(dc,q,id);else drawButton(dc,q,id);}
+    for(int id=OPEN;id<=LAYER_TARP;id++){HWND b=mainControl(id);if(!b||GetParent(b)==sidebarWin||!(GetWindowLongW(b,GWL_STYLE)&WS_VISIBLE))continue;RECT q;GetWindowRect(b,&q);MapWindowPoints(nullptr,mainWin,(POINT*)&q,2);if(id==ACTIVE_FILE||id==BASE_FILE)drawFilePicker(dc,q,id);else drawButton(dc,q,id);}
+    sidebarCapture(dc);
     wchar_t text[1024]{};GetWindowTextW(statusWin,text,1024);label(dc,{24,r.bottom-29,r.right-24,r.bottom-7},text,muted);
     if(!model.points.empty()){
         render();glFinish();glReadBuffer(GL_FRONT);glPixelStorei(GL_PACK_ALIGNMENT,4);int stride=(viewW*3+3)&~3;std::vector<unsigned char> pixels(size_t(stride)*viewH);glReadPixels(0,0,viewW,viewH,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());

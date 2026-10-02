@@ -1,4 +1,6 @@
-#ifdef PERF_BASELINE
+#ifdef PERF_331_BASELINE
+#include "../build/perf331/baseline/src/volume.hpp"
+#elif defined(PERF_BASELINE)
 #include "../build/perf320/baseline/src/volume.hpp"
 #else
 #include "../src/volume.hpp"

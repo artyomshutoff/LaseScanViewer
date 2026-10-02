@@ -13,20 +13,25 @@
 #include <sstream>
 #include <iomanip>
 #include "model.hpp"
+#include "view_presets.hpp"
 
-HWND mainWin,viewWin,statusWin; HDC glDC; HGLRC glRC; HFONT font,titleFont;
+HWND mainWin,viewWin,statusWin,sidebarWin;
+HWND mainControl(int id){auto w=GetDlgItem(mainWin,id);return w?w:GetDlgItem(sidebarWin,id);}
+void sidebarLayout();void sidebarSync();void sidebarPaint(HDC dc);void sidebarCapture(HDC dc); HDC glDC; HGLRC glRC; HFONT font,titleFont;
+bool sidebarLayerDraw(HDC dc,RECT r,int id,bool focus);void sidebarEnsureVisible(HWND w);bool sidebarCommand(int id);void sidebarTests();
 Model model; std::filesystem::path loadedPath,pendingPath; std::future<Model> loading;
 std::filesystem::path renderTestDir;
 bool busy=false,mesh=false,grid=false; float yaw=160,pitch=45,zoom=1,panX=0,panY=0,pointSize=1,orthoHeight=1;
 POINT mouse{}; int dragging=0; GLuint pointList=0,faceList=0,textList=0,bigTextList=0; int viewW=1,viewH=1;
 unsigned captionSizeEvents=0;
-constexpr wchar_t applicationTitle[]=L"LaseScanViewer [Version: 3.30.2]";
+constexpr wchar_t applicationTitle[]=L"LaseScanViewer [Version: 3.34.0]";
 constexpr int OPEN=101,POINT_MODE=102,SURFACE=103,RESET=104,TOP=105,FRONT=106,SIDE=107,EXPORT=108,GRID=109,SMALL=110,LARGE=111,GROUP0=112,GROUP1=113;
 #include "v2_state.hpp"
 std::wstring widen(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),nullptr,0);std::wstring w(n,0);MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),w.data(),n);return w;}
 void status(const std::wstring& s){SetWindowTextW(statusWin,s.c_str());}
 void syncControls();
-void redraw(){syncControls();InvalidateRect(viewWin,nullptr,FALSE);InvalidateRect(mainWin,nullptr,FALSE);}
+void command(int id);
+void redraw(){syncControls();if(sidebarWin)InvalidateRect(sidebarWin,nullptr,FALSE);InvalidateRect(viewWin,nullptr,FALSE);InvalidateRect(mainWin,nullptr,FALSE);}
 ViewBounds currentViewBounds(){if(lockedFrame)return *lockedFrame;const Model& frame=cargoView&&showContext&&activeDocument>=0?documents[activeDocument].data:cargoView?cargo.geometry:model;return {frame.lo,frame.hi,!frame.points.empty()};}
 void reset(){lockedFrame.reset();yaw=160;pitch=45;zoom=1;panX=panY=0;redraw();}
 #include "zone_preview.hpp"
@@ -132,7 +137,7 @@ void saveFrame(const std::filesystem::path& path){
     std::ofstream out(path,std::ios::binary);out.write((char*)&fh,sizeof(fh));out.write((char*)&ih,sizeof(ih));out.write((char*)pixels.data(),pixels.size());if(!out)throw std::runtime_error("Render image write failed");
 }
 void startLoad(std::filesystem::path p,int preferredType=-1){
-    if(busy)return;busy=true;status(L"Чтение BIN и построение поверхности…");EnableWindow(GetDlgItem(mainWin,OPEN),FALSE);redraw();
+    if(busy)return;busy=true;status(L"Чтение BIN и построение поверхности…");EnableWindow(mainControl(OPEN),FALSE);redraw();
     replacing=preferredType>=0;pendingPath=p;loading=std::async(std::launch::async,[p,preferredType]{auto m=readModel(p,preferredType);triangulate(m);return m;});SetTimer(mainWin,1,50,nullptr);
 }
 void openFile(){std::vector<wchar_t> p(65536);OPENFILENAMEW o{};o.lStructSize=sizeof(o);o.hwndOwner=mainWin;o.lpstrFilter=L"LASE BIN (*.bin)\0*.bin\0Все файлы\0*.*\0";o.lpstrFile=p.data();o.nMaxFile=DWORD(p.size());o.lpstrTitle=L"Открыть сканы (можно выбрать несколько)";o.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR|OFN_ALLOWMULTISELECT|OFN_EXPLORER;
@@ -162,22 +167,35 @@ LRESULT CALLBACK ViewProc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
 }
 #include "ui.hpp"
 #include "v2.hpp"
+#include "sidebar_ui.hpp"
+void openWebViewer(){
+ wchar_t path[32768]{};GetModuleFileNameW(nullptr,path,32768);auto dir=std::filesystem::path(path).parent_path();
+ auto exe=dir/(sizeof(void*)==4?L"LaseScanViewer-Web-Portable.exe":L"LaseScanViewer-Web.exe");
+ if(!std::filesystem::exists(exe)){MessageBoxW(mainWin,L"Веб-просмотрщик не найден. Распакуйте полный архив программы в одну папку.",L"Веб-интерфейс",MB_ICONINFORMATION);return;}
+ std::wstring args;for(int i:{activeDocument,baseDocument})if(i>=0&&i<int(documents.size()))args+=L"\""+documents[i].path.wstring()+L"\" ";
+ if((INT_PTR)ShellExecuteW(mainWin,L"open",exe.c_str(),args.c_str(),dir.c_str(),SW_HIDE)<=32)MessageBoxW(mainWin,L"Не удалось запустить локальный веб-просмотрщик.",L"Веб-интерфейс",MB_ICONERROR);
+}
+void presetView(view::Preset preset){
+ const Model& original=activeDocument>=0?documents[activeDocument].data:model;
+ auto angles=view::preset(preset,view::heading(original));yaw=float(angles.yaw);pitch=float(angles.pitch);panX=panY=0;zoom=1;
+ auto frame=currentViewBounds();if(frame.valid){auto fit=view::fit(cargoView?cargo.geometry:model,angles,frame.lo,frame.hi,double(viewW)/viewH);zoom=float(fit.zoom);panX=float(fit.x);panY=float(fit.y);}
+}
 void command(int id){
-    switch(id){case GROUP0:if(!loadedPath.empty()&&(model.availableTypes&1))startLoad(loadedPath,0);break;case GROUP1:if(!loadedPath.empty()&&(model.availableTypes&2))startLoad(loadedPath,1);break;case OPEN:openFile();break;case POINT_MODE:mesh=false;break;case SURFACE:mesh=true;break;case RESET:reset();break;case TOP:yaw=0;pitch=0;panX=panY=0;zoom=1;break;case FRONT:yaw=0;pitch=90;panX=panY=0;zoom=1;break;case SIDE:yaw=90;pitch=90;panX=panY=0;zoom=1;break;case EXPORT:saveFile();break;case GRID:showZone=!showZone;break;case SMALL:pointSize=std::max(1.f,pointSize-1);break;case LARGE:pointSize=std::min(8.f,pointSize+1);break;}
+    switch(id){case WEB_VIEW:openWebViewer();break;case GROUP0:if(!loadedPath.empty()&&(model.availableTypes&1))startLoad(loadedPath,0);break;case GROUP1:if(!loadedPath.empty()&&(model.availableTypes&2))startLoad(loadedPath,1);break;case OPEN:openFile();break;case POINT_MODE:mesh=false;break;case SURFACE:mesh=true;break;case RESET:reset();break;case TOP:presetView(view::Preset::Top);break;case FRONT:presetView(view::Preset::Front);break;case SIDE:presetView(view::Preset::Side);break;case EXPORT:saveFile();break;case GRID:showZone=!showZone;break;case SMALL:pointSize=std::max(1.f,pointSize-1);break;case LARGE:pointSize=std::min(8.f,pointSize+1);break;}
     redraw();
 }
 LRESULT CALLBACK MainProc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
     switch(msg){
-    case WM_GETMINMAXINFO:reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize={1120,760};return 0;
+    case WM_GETMINMAXINFO:reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize={1120,820};return 0;
     case WM_SIZE:if(v2TestMode)++captionSizeEvents;layout();redraw();return 0;
     case WM_MEASUREITEM:{auto item=reinterpret_cast<MEASUREITEMSTRUCT*>(lp);if(item->CtlType==ODT_COMBOBOX){item->itemHeight=32;return TRUE;}break;}
     case WM_DRAWITEM:{auto d=reinterpret_cast<DRAWITEMSTRUCT*>(lp);if(d->CtlType==ODT_COMBOBOX){drawPickerItem(d);return TRUE;}drawButton(d->hDC,d->rcItem,int(d->CtlID),(d->itemState&ODS_SELECTED)!=0,(d->itemState&ODS_FOCUS)!=0);return TRUE;}
     case WM_PAINT:{PAINTSTRUCT ps;HDC dc=BeginPaint(w,&ps);paintPanel(dc);EndPaint(w,&ps);return 0;}
     case WM_CTLCOLORLISTBOX:SetTextColor((HDC)wp,ink);SetBkColor((HDC)wp,panel);SetDCBrushColor((HDC)wp,panel);return (LRESULT)GetStockObject(DC_BRUSH);
     case WM_CTLCOLORSTATIC:SetTextColor((HDC)wp,muted);SetBkColor((HDC)wp,bg);SetDCBrushColor((HDC)wp,bg);return (LRESULT)GetStockObject(DC_BRUSH);
-    case WM_COMMAND:if(LOWORD(wp)>=ACTIVE_FILE){v2Command(LOWORD(wp),HIWORD(wp));return 0;}command(LOWORD(wp));return 0;
+    case WM_COMMAND:if(sidebarCommand(LOWORD(wp)))return 0;if(LOWORD(wp)>=ACTIVE_FILE&&LOWORD(wp)!=WEB_VIEW){v2Command(LOWORD(wp),HIWORD(wp));return 0;}command(LOWORD(wp));return 0;
     case WM_KEYDOWN:if(wp==VK_ESCAPE){selecting=selectRegion=false;ReleaseCapture();redraw();}else if(wp=='O'&&(GetKeyState(VK_CONTROL)&0x8000))openFile();else if(wp=='S'&&(GetKeyState(VK_CONTROL)&0x8000))saveFile();else if(wp=='R'||wp==VK_HOME)reset();else if(wp=='1')command(POINT_MODE);else if(wp=='2')command(SURFACE);return 0;
-    case WM_TIMER:if(wp==3){finishComparison();return 0;}if(wp==2){finishAlignment();return 0;}if(busy && loading.wait_for(std::chrono::seconds(0))==std::future_status::ready){KillTimer(w,1);busy=false;EnableWindow(GetDlgItem(w,OPEN),TRUE);try{auto next=loading.get();acceptLoaded(std::move(next));if(!renderTestDir.empty()&&loadQueue.empty())PostMessageW(w,v2TestMode?WM_APP+2:WM_APP+1,0,0);SetWindowTextW(w,(std::wstring(applicationTitle)+L" — "+loadedPath.filename().wstring()).c_str());status(L"Скан открыт   ·   "+grouped(model.points.size())+L" точек   ·   Геометрия в исходных координатах");}catch(const std::exception& e){status(L"Не удалось открыть BIN. Выберите файл поддерживаемого формата.");MessageBoxW(w,(L"Не удалось прочитать файл.\nПоддерживается проверенная структура LASE Full/Empty/Reference.\n\n"+widen(e.what())).c_str(),L"Ошибка чтения",MB_ICONERROR);}redraw();if(!loadQueue.empty()){auto p=loadQueue.front();loadQueue.pop_front();startLoad(p);}}return 0;
+    case WM_TIMER:if(wp==3){finishComparison();return 0;}if(wp==2){finishAlignment();return 0;}if(busy && loading.wait_for(std::chrono::seconds(0))==std::future_status::ready){KillTimer(w,1);busy=false;EnableWindow(mainControl(OPEN),TRUE);try{auto next=loading.get();acceptLoaded(std::move(next));if(!renderTestDir.empty()&&loadQueue.empty())PostMessageW(w,v2TestMode?WM_APP+2:WM_APP+1,0,0);SetWindowTextW(w,(std::wstring(applicationTitle)+L" — "+loadedPath.filename().wstring()).c_str());status(L"Скан открыт   ·   "+grouped(model.points.size())+L" точек   ·   Геометрия в исходных координатах");}catch(const std::exception& e){pendingBaseOnly=false;status(L"Не удалось открыть BIN. Выберите файл поддерживаемого формата.");MessageBoxW(w,(L"Не удалось прочитать файл.\nПоддерживается проверенная структура LASE Full/Empty/Reference.\n\n"+widen(e.what())).c_str(),L"Ошибка чтения",MB_ICONERROR);}redraw();if(!loadQueue.empty()){auto p=loadQueue.front();loadQueue.pop_front();startLoad(p);}}return 0;
     case WM_APP+2:runV2Test();DestroyWindow(w);return 0;
     case WM_APP+3:manualCalculator(1);DestroyWindow(w);return 0;
     case WM_APP+4:runCaptionRefreshTest();DestroyWindow(w);return 0;
@@ -197,17 +215,23 @@ int WINAPI wWinMain(HINSTANCE inst,HINSTANCE,PWSTR,int show){
     if(HMODULE dwm=LoadLibraryW(L"dwmapi.dll")){using SetAttribute=HRESULT(WINAPI*)(HWND,DWORD,LPCVOID,DWORD);auto set=(SetAttribute)GetProcAddress(dwm,"DwmSetWindowAttribute");BOOL dark=TRUE;if(set&&FAILED(set(mainWin,20,&dark,sizeof(dark))))set(mainWin,19,&dark,sizeof(dark));FreeLibrary(dwm);}
     font=CreateFontW(-16,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");titleFont=CreateFontW(-27,0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
     smallFont=CreateFontW(-13,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");numberFont=CreateFontW(-22,0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
-    auto button=[&](int id,const wchar_t* title,int x,int y,int width,int height=38){HWND b=CreateWindowW(L"BUTTON",title,WS_VISIBLE|WS_CHILD|WS_TABSTOP|BS_OWNERDRAW,x,y,width,height,mainWin,(HMENU)(INT_PTR)id,inst,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)font,TRUE);SetWindowSubclass(b,ButtonSkinProc,1,0);};
-    button(OPEN,L"+   Открыть Full / пару",20,99,216,44);button(CLOSE_FILE,L"×",244,99,36,44);
-    button(POINT_MODE,L"Точки",20,182,126);button(SURFACE,L"Поверхность",154,182,126);
-    button(TOP,L"Сверху",20,262,81);button(FRONT,L"Спереди",109,262,82);button(SIDE,L"Сбоку",199,262,81);
-    button(RESET,L"Общий вид   ·   R",20,308,260);
-    button(GROUP1,L"Набор 1",20,388,126);button(GROUP0,L"Набор 0",154,388,126);
-    button(GRID,L"Зона интереса",20,468,126);button(CARGO,L"Только груз",154,468,126);
-    button(CONTEXT_POINTS,L"Остальные точки",20,514,260,36);
-    button(SMALL,L"−",200,558,36,32);button(LARGE,L"+",244,558,36,32);
-    button(EXPORT,L"Экспортировать PLY",20,800,260,40);
-    button(LOAD_DATABASE,L"База SQ3",20,606,78,34);button(MANUAL_CALC,L"Обмеры кузова",106,606,174,34);
+    createSidebar(inst);
+    auto button=[&](int id,const wchar_t* title,int x,int y,int width,int height=38){HWND b=CreateWindowW(L"BUTTON",title,WS_VISIBLE|WS_CHILD|WS_TABSTOP|BS_OWNERDRAW,x,y,width,height,sidebarWin,(HMENU)(INT_PTR)id,inst,nullptr);SetPropW(b,L"SidebarY",(HANDLE)(INT_PTR)(y+1));SendMessageW(b,WM_SETFONT,(WPARAM)font,TRUE);SetWindowSubclass(b,ButtonSkinProc,1,0);};
+    button(OPEN,L"Открыть Full / пару",20,112,216,38);button(CLOSE_FILE,L"×",244,112,36,38);
+    button(OPEN_EMPTY,L"Открыть Empty / Reference",20,158,260,38);
+    button(TOP,L"Сверху",20,234,81,34);button(FRONT,L"Спереди",109,234,82,34);button(SIDE,L"Сбоку",199,234,81,34);
+    button(RESET,L"Общий вид   ·   R",20,276,260,34);
+    createSidebarLayers(inst);
+    button(POINT_MODE,L"Точки",20,618,126,34);button(SURFACE,L"Поверхность",154,618,126,34);
+    button(GROUP1,L"Набор 1",20,660,126,32);button(GROUP0,L"Набор 0",154,660,126,32);
+    button(SMALL,L"−",200,704,36,30);button(LARGE,L"+",244,704,36,30);
+    button(LOAD_DATABASE,L"Загрузить базу SQ3",20,752,260,34);
+    button(MANUAL_CALC,L"Обмеры кузова",20,794,260,34);
+    button(WEB_VIEW,L"Открыть в браузере",20,836,260,34);
+    button(EXPORT,L"Экспортировать PLY",20,904,260,34);
+    // Legacy shortcuts remain available to the existing command/test paths.
+    button(CARGO,L"Только груз",0,0,1,1);ShowWindow(mainControl(CARGO),SW_HIDE);
+    button(CONTEXT_POINTS,L"Остальные точки",0,0,1,1);ShowWindow(mainControl(CONTEXT_POINTS),SW_HIDE);
     createV2Controls(inst);
     viewWin=CreateWindowW(L"Lase3DView",L"3D",WS_CHILD|WS_CLIPSIBLINGS,320,88,1000,750,mainWin,nullptr,inst,nullptr);
     statusWin=CreateWindowW(L"STATIC",L"Готово   ·   Откройте BIN-файл или перетащите его в окно",WS_CHILD|WS_VISIBLE,12,780,1250,24,mainWin,nullptr,inst,nullptr);SendMessageW(statusWin,WM_SETFONT,(WPARAM)font,TRUE);

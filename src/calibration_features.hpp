@@ -26,8 +26,9 @@ inline std::array<double,190> volumeFeatures(const Model& active,const Model& ba
     parallelJobs(divisors.size(),[&](size_t block){
         double divisor=divisors[block];size_t index=block*12;
         double step=span/divisor;std::map<CellKey,std::vector<double>> a,b;
-        for(auto p:active.points)a[{int(std::floor(p.x/step)),int(std::floor(p.y/step))}].push_back(p.z);
-        for(auto p:base.points){p=prepared(p);b[{int(std::floor(p.x/step)),int(std::floor(p.y/step))}].push_back(p.z);}
+        OrderedCellLookup<std::vector<double>> aLookup(a,active.points.size()),bLookup(b,base.points.size());
+        for(auto p:active.points)aLookup({int(std::floor(p.x/step)),int(std::floor(p.y/step))}).push_back(p.z);
+        for(auto p:base.points){p=prepared(p);bLookup({int(std::floor(p.x/step)),int(std::floor(p.y/step))}).push_back(p.z);}
         for(auto&[k,v]:a){(void)k;std::sort(v.begin(),v.end());}
         for(auto&[k,v]:b){(void)k;std::sort(v.begin(),v.end());}
         for(double cut:{.80,.90,.95,.98})for(double quantile:{.5,.9,1.}){
@@ -42,7 +43,7 @@ inline std::array<double,190> volumeFeatures(const Model& active,const Model& ba
             for(double d:shifts)deviations.push_back(std::abs(d-shift));
             auto variant=c;
             for(auto&[k,v]:variant.cells){(void)k;v.base+=shift;v.delta-=shift;}
-            double candidate=buildCargo(variant,cargo.threshold,true,nullptr,true).volume;
+            double candidate=buildCargo(variant,cargo.threshold,true,nullptr,true,nullptr,false).volume;
             features[index]=candidate/cargo.volume-1;
             features[48+index]=median(deviations)/1000.;
             features[96+index]=std::log1p(double(shifts.size()));
@@ -50,12 +51,12 @@ inline std::array<double,190> volumeFeatures(const Model& active,const Model& ba
         }
     });if(progress)progress(48);
     auto anchors=bedAnchors(active,base,c,cargo);
-    for(size_t i=0;i<anchors.size();++i){
+    parallelJobs(anchors.size(),[&](size_t i){
         auto variant=c;
         for(auto& kv:variant.cells){kv.second.base+=anchors[i].shift;kv.second.delta-=anchors[i].shift;}
-        features[144+i]=buildCargo(variant,cargo.threshold,true,nullptr,true).volume/cargo.volume-1;
-        if(progress)progress(49+int(i));
-    }
+        features[144+i]=buildCargo(variant,cargo.threshold,true,nullptr,true,nullptr,false).volume/cargo.volume-1;
+    });
+    for(size_t i=0;i<anchors.size();++i)if(progress)progress(49+int(i));
     auto shape=cargoShapeFeatures(c,cargo);
     for(size_t i=0;i<shape.size();++i){features[180+i]=shape[i];if(progress)progress(85+int(i));}
     return features;

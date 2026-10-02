@@ -8,7 +8,8 @@ class BodyObservations {
     std::map<CellKey,std::vector<Point>> bins;
 public:
     BodyObservations(const Model& base,const CompareOptions& options,double tolerance):radius(tolerance){
-        for(auto p:base.points){p=transformBase(p,options);bins[{int(std::floor(p.x/radius)),int(std::floor(p.y/radius))}].push_back(p);}
+        PreparedBaseTransform prepared(options);OrderedCellLookup<std::vector<Point>> lookup(bins,base.points.size());
+        for(auto p:base.points){p=prepared(p);lookup({int(std::floor(p.x/radius)),int(std::floor(p.y/radius))}).push_back(p);}
         for(auto& [key,points]:bins){(void)key;std::sort(points.begin(),points.end(),[](Point a,Point b){return a.z<b.z;});}
     }
     bool matches(Point p)const{
@@ -26,7 +27,7 @@ public:
     }
 };
 
-inline bool nearCargoSurface(const Comparison& c,CellKey k,Point p,double threshold){
+inline double cargoSurfaceBand(const Comparison& c,CellKey k,double threshold){
     const auto& cell=c.cells.at(k);
     // The quantile describes the material surface. Do not color the entire
     // vertical column, which also contains the exterior body and tall rails.
@@ -36,6 +37,9 @@ inline bool nearCargoSurface(const Comparison& c,CellKey k,Point p,double thresh
         if(it!=c.cells.end()&&it->second.delta>threshold)
             slope=std::max(slope,std::abs(it->second.active-cell.active));
     }
-    double band=std::max(threshold,c.options.step*.75)+std::min(slope,c.options.step)*.5;
+    return std::max(threshold,c.options.step*.75)+std::min(slope,c.options.step)*.5;
+}
+inline bool nearCargoSurface(const Comparison& c,CellKey k,Point p,double threshold){
+    const auto& cell=c.cells.at(k);double band=cargoSurfaceBand(c,k,threshold);
     return p.z>=cell.active-band&&p.z<=cell.active+band;
 }
