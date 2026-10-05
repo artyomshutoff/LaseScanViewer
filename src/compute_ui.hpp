@@ -17,6 +17,6 @@ void computeSettings(int test=0){
  control(L"STATIC",gpu.ready?L"Видеокарта: "+widen(gpu.name):L"GPU недоступен: "+widen(gpu.reason),0,24,106,590,52);
  control(L"STATIC",L"GPU помогает совмещению сканов. Интегрирование объёма и точное\nуточнение остаются на CPU. GPU использует двойную точность.\nНа небольших облаках CPU может быть быстрее.\nПри ошибке драйвера поиск продолжится на CPU.\nВыбор применяется к следующему совмещению.",0,24,164,590,112);
  control(L"BUTTON",L"Применить",IDOK,340,300,130,36,BS_DEFPUSHBUTTON|WS_TABSTOP);control(L"BUTTON",L"Отмена",IDCANCEL,480,300,130,36,BS_PUSHBUTTON|WS_TABSTOP);
- if(test)SetTimer(w,1,50,nullptr);EnableWindow(mainWin,FALSE);ShowWindow(w,SW_SHOW);MSG msg;while(!d.done&&GetMessageW(&msg,nullptr,0,0)>0)if(!IsDialogMessageW(w,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}EnableWindow(mainWin,TRUE);SetActiveWindow(mainWin);
+ if(test)SetTimer(w,1,50,nullptr);EnableWindow(mainWin,FALSE);skinSettings(w);ShowWindow(w,SW_SHOW);MSG msg;while(!d.done&&GetMessageW(&msg,nullptr,0,0)>0)if(!IsDialogMessageW(w,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}EnableWindow(mainWin,TRUE);SetActiveWindow(mainWin);
  if(d.accepted){compute::choose(d.selected);status(d.selected==compute::Backend::GPU?L"Вычисления: GPU + CPU · "+widen(gpu.name):L"Вычисления: CPU");redraw();}
 }

@@ -14,6 +14,18 @@ int main(){
   assert(f.pitch==90&&s.pitch==90);
   m.lo={-100,-100,-10};m.hi={100,100,10};auto fitted=view::fit(m,f,m.lo,m.hi,1.6);assert(fitted.zoom>1&&std::abs(fitted.x)<.001&&std::abs(fitted.y)<.01);
  }
+ // Every frame corner must fit with room for labels, even in narrow windows.
+ for(double heading:{-80.,0.,45.,89.})for(double aspect:{.6,1.,1.8,2.5}){
+  Point lo{-7000,-2400,800},hi{6381,1825,3485};auto angles=view::preset(view::Preset::General,heading);
+  assert(angles.yaw==165-heading&&angles.pitch==55);
+  auto corners=view::frameCorners(lo,hi);auto f=view::fit(corners,angles,lo,hi,aspect);
+  double span=hi.x-lo.x,k=2/span,a=angles.yaw*3.141592653589793/180,p=-angles.pitch*3.141592653589793/180;
+  double base=std::hypot(std::hypot(hi.x-lo.x,hi.y-lo.y),hi.z-lo.z)/span*1.08/std::min(aspect,1.),scale=base/f.zoom;
+  for(auto point:corners.points){double x=(point.x-(lo.x+hi.x)*.5)*k,y=(point.y-(lo.y+hi.y)*.5)*k,z=(point.z-(lo.z+hi.z)*.5)*k;
+   double u=std::cos(a)*x-std::sin(a)*y+f.x,v=std::cos(p)*(std::sin(a)*x+std::cos(a)*y)-std::sin(p)*z+f.y;
+   assert(std::abs(u)/(scale*aspect)<=1/1.15+1e-6&&std::abs(v)/scale<=1/1.15+1e-6);
+  }
+ }
  assert(view::heading({})==0);auto t=view::preset(view::Preset::Top,35);assert(t.yaw==0&&t.pitch==0);
  std::cout<<"PASS front: width/Z, side: length/Z, rotated scans and empty input\n";
 }

@@ -14,11 +14,19 @@ std::wstring waterSummary(){
     double load=(cargo.calibrated?cargo.calibratedVolume:cargo.volume);
     return L"По бортам (вода): "+num(water.volume*k,2)+L" м³   ·   Груз: "+num(load/water.volume*100,1)+L"%   ·   Разница: "+num((water.volume-load)*k,2)+L" м³";
 }
+int selectedFile(int control){auto w=mainControl(control);int row=int(SendMessageW(w,CB_GETCURSEL,0,0));return row<0?-1:int(SendMessageW(w,CB_GETITEMDATA,row,0));}
 void updateFileLists(){
-    for(int id:{ACTIVE_FILE,BASE_FILE})SendMessageW(mainControl(id),CB_RESETCONTENT,0,0);
-    SendMessageW(mainControl(BASE_FILE),CB_ADDSTRING,0,(LPARAM)L"Пустой кузов: Empty или Reference");
-    for(const auto& d:documents){std::wstring name=(d.data.kind==2?L"[Full] ":d.data.kind==3?L"[Ref] ":L"[Empty] ")+d.path.filename().wstring()+L" · "+widen(d.data.label)+L" · набор "+std::to_wstring(d.data.selectedType);for(int id:{ACTIVE_FILE,BASE_FILE}){std::wstring entry=(id==ACTIVE_FILE?L"С грузом: ":L"Пустой: ")+name;SendMessageW(mainControl(id),CB_ADDSTRING,0,(LPARAM)entry.c_str());}}
-    SendMessageW(mainControl(ACTIVE_FILE),CB_SETCURSEL,activeDocument,0);SendMessageW(mainControl(BASE_FILE),CB_SETCURSEL,baseDocument+1,0);
+    for(int id:{ACTIVE_FILE,BASE_FILE}){
+        auto w=mainControl(id);SendMessageW(w,CB_RESETCONTENT,0,0);
+        SendMessageW(w,CB_ADDSTRING,0,(LPARAM)(id==ACTIVE_FILE?L"С грузом: выберите Full":L"Пустой кузов: Empty или Reference"));SendMessageW(w,CB_SETITEMDATA,0,-1);
+        int selected=0;
+        for(int i=0;i<int(documents.size());++i){const auto& d=documents[i];if((d.data.kind==2)!=(id==ACTIVE_FILE))continue;
+            std::wstring name=(d.data.kind==2?L"[Full] ":d.data.kind==3?L"[Ref] ":L"[Empty] ")+d.path.filename().wstring()+L" · "+widen(d.data.label);
+            std::wstring entry=(id==ACTIVE_FILE?L"С грузом: ":L"Пустой: ")+name;int row=int(SendMessageW(w,CB_ADDSTRING,0,(LPARAM)entry.c_str()));SendMessageW(w,CB_SETITEMDATA,row,i);
+            if(i==(id==ACTIVE_FILE?activeDocument:baseDocument))selected=row;
+        }
+        SendMessageW(w,CB_SETCURSEL,selected,0);
+    }
 }
 void selectDocument(int index){
     if(index<0||index>=int(documents.size())||busy)return;
@@ -29,9 +37,17 @@ void acceptLoaded(Model next){
     if(baseOnly&&next.kind==2)throw std::runtime_error("Для пустого кузова выберите Empty или Reference");
     size_t total=next.points.size();for(size_t i=0;i<documents.size();i++)if(!replacing||int(i)!=activeDocument)total+=documents[i].data.points.size();
     if(total>5000000)throw std::runtime_error("Session limit: 5 million points; close unused files");
-    if(baseOnly&&activeDocument>=0){if(documents.size()>=12)throw std::runtime_error("Session limit: 12 files; close unused files");int active=activeDocument;documents.push_back({pendingPath,std::move(next)});selectDocument(active);baseDocument=int(documents.size())-1;compileLists();updateFileLists();return;}
+    if(next.kind!=2&&!replacing){
+        if(documents.size()>=12)throw std::runtime_error("Session limit: 12 files; close unused files");
+        int active=activeDocument;documents.push_back({pendingPath,std::move(next)});int base=int(documents.size())-1;
+        // An Empty-only session still previews the model, but does not select it as Full.
+        if(active<0||documents[active].data.kind!=2)selectDocument(base);else{invalidateComparison();compileLists();}
+        baseDocument=base;
+        if(!baseOnly&&loadQueue.empty())for(int f=int(documents.size())-1;f>=0;--f)if(documents[f].data.kind==2&&documents[f].data.scan==documents[base].data.scan){selectDocument(f);break;}
+        compileLists();updateFileLists();redraw();return;
+    }
     if(replacing&&activeDocument>=0){documents[activeDocument]={pendingPath,std::move(next)};selectDocument(activeDocument);}
-    else {if(documents.size()>=12)throw std::runtime_error("Session limit: 12 files; close unused files");int old=activeDocument;documents.push_back({pendingPath,std::move(next)});selectDocument(int(documents.size())-1);if(baseDocument<0&&old>=0)baseDocument=old;}
+    else {if(documents.size()>=12)throw std::runtime_error("Session limit: 12 files; close unused files");int old=activeDocument;documents.push_back({pendingPath,std::move(next)});selectDocument(int(documents.size())-1);if(baseDocument<0&&old>=0&&documents[old].data.kind!=2)baseDocument=old;}
     if(loadQueue.empty()){
         for(int f=int(documents.size())-1;f>=0;--f)if(documents[f].data.kind==2){int base=-1;for(int j=int(documents.size())-1;j>=0;--j)if(j!=f&&documents[j].data.kind==1&&documents[j].data.scan==documents[f].data.scan){base=j;break;}if(base<0&&documents.size()==2&&documents[1-f].data.kind!=2)base=1-f;if(base>=0){selectDocument(f);baseDocument=base;compileLists();break;}}
     }
@@ -65,22 +81,24 @@ std::wstring comparisonSummary(){
 }
 void v2Layout(){
     RECT r;GetClientRect(mainWin,&r);int width=std::max(100,int(r.right)-340),half=(width-10)/2;
-    MoveWindow(mainControl(ACTIVE_FILE),320,81,half,320,TRUE);MoveWindow(mainControl(BASE_FILE),330+half,81,half,320,TRUE);
+    MoveWindow(mainControl(ACTIVE_FILE),320,81,half-40,320,TRUE);MoveWindow(mainControl(CLOSE_FILE),320+half-36,81,36,34,TRUE);
+    MoveWindow(mainControl(BASE_FILE),330+half,81,half-40,320,TRUE);MoveWindow(mainControl(CLOSE_BASE),330+2*half-36,81,36,34,TRUE);
     int x=320;for(auto pair:{std::pair<int,int>{COMPARE,100},{AUTO_ALIGN,112},{OVERLAY,96},{REGION_SELECT,78},{REGION_CLEAR,66},{OPTIONS,94},{PNG_SAVE,62},{REPORT_SAVE,76}}){MoveWindow(mainControl(pair.first),x,124,pair.second,34,TRUE);x+=pair.second+8;}
 }
 void createV2Controls(HINSTANCE inst){
     for(int id:{ACTIVE_FILE,BASE_FILE}){HWND b=CreateWindowW(L"COMBOBOX",L"",WS_VISIBLE|WS_CHILD|WS_TABSTOP|CBS_DROPDOWNLIST|CBS_OWNERDRAWFIXED|CBS_HASSTRINGS|WS_VSCROLL,320,81,300,320,mainWin,(HMENU)(INT_PTR)id,inst,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)font,TRUE);SendMessageW(b,CB_SETDROPPEDWIDTH,520,0);SendMessageW(b,CB_SETITEMHEIGHT,WPARAM(-1),28);SetWindowSubclass(b,PickerSkinProc,1,0);}
-    const std::pair<int,const wchar_t*> buttons[]={{COMPARE,L"Рассчитать"},{AUTO_ALIGN,L"Совместить"},{OVERLAY,L"Сравнить"},{REGION_SELECT,L"Область"},{REGION_CLEAR,L"Сброс"},{OPTIONS,L"Настройки"},{PNG_SAVE,L"PNG"},{REPORT_SAVE,L"Отчёт"}};
+    const std::pair<int,const wchar_t*> buttons[]={{CLOSE_FILE,L"×"},{CLOSE_BASE,L"×"},{COMPARE,L"Рассчитать"},{AUTO_ALIGN,L"Совместить"},{OVERLAY,L"Сравнить"},{REGION_SELECT,L"Область"},{REGION_CLEAR,L"Сброс"},{OPTIONS,L"Настройки"},{PNG_SAVE,L"PNG"},{REPORT_SAVE,L"Отчёт"}};
     for(auto [id,text]:buttons){auto b=CreateWindowW(L"BUTTON",text,WS_VISIBLE|WS_CHILD|WS_TABSTOP|BS_OWNERDRAW,0,124,80,34,mainWin,(HMENU)(INT_PTR)id,inst,nullptr);SendMessageW(b,WM_SETFONT,(WPARAM)font,TRUE);SetWindowSubclass(b,ButtonSkinProc,1,0);}
     HWND tips=CreateWindowExW(WS_EX_TOPMOST,TOOLTIPS_CLASSW,nullptr,WS_POPUP|TTS_ALWAYSTIP,0,0,0,0,mainWin,nullptr,inst,nullptr);SendMessageW(tips,TTM_SETMAXTIPWIDTH,0,360);
-    for(auto [id,text]:std::initializer_list<std::pair<int,const wchar_t*>>{{GRID,L"Показать или скрыть границы зоны интереса, линии и подписи X, Y, Z. Камера и расчёт сохраняются."},{OPEN,L"Откройте Full. Файл Empty с тем же номером в этой папке загрузится автоматически. Можно выбрать несколько BIN."},{COMPARE,L"Совместить сканы и оценить объём. После расчёта проверьте, что выбран только груз."},{AUTO_ALIGN,L"Расширенный поиск 0–360° по скану и верхним частям кузова, затем точное уточнение. Может занять время; ход работы показан внизу. Проверьте совпадение бортов."},{OVERLAY,L"Оранжевый: Full. Голубой: Empty. Проверьте неподвижные части кузова."},{REGION_SELECT,L"Вид сверху: выделите кузов мышью. Восстановление пропусков можно отключить в настройках."},{OPTIONS,L"Слои просмотра: Full, Empty, груз, серый фон и две заливки по воде. Параметры расчёта доступны отдельным пунктом меню."},{CONTEXT_POINTS,L"Показать остальные точки исходного Full серыми, включая точки вне области расчёта. Груз остаётся цветным; м³ не меняются."},{CARGO,L"Показать выделенный груз или полную карту разности высот."},{REPORT_SAVE,L"Сохранить PDF или HTML с изображением, объёмом, покрытием и параметрами расчёта."}}){TOOLINFOW tool{};tool.cbSize=sizeof(tool);tool.uFlags=TTF_IDISHWND|TTF_SUBCLASS;tool.hwnd=mainWin;tool.uId=(UINT_PTR)mainControl(id);tool.lpszText=const_cast<wchar_t*>(text);SendMessageW(tips,TTM_ADDTOOLW,0,(LPARAM)&tool);}
+    for(auto [id,text]:std::initializer_list<std::pair<int,const wchar_t*>>{{CLOSE_FILE,L"Закрыть выбранный Full."},{CLOSE_BASE,L"Закрыть выбранный Empty / Reference."},{GRID,L"Показать или скрыть границы зоны интереса, линии и подписи X, Y, Z. Камера и расчёт сохраняются."},{OPEN,L"Откройте Full. Файл Empty с тем же номером в этой папке загрузится автоматически. Можно выбрать несколько BIN."},{COMPARE,L"Совместить сканы и оценить объём. После расчёта проверьте, что выбран только груз."},{AUTO_ALIGN,L"Расширенный поиск 0–360° по скану и верхним частям кузова, затем точное уточнение. Может занять время; ход работы показан внизу. Проверьте совпадение бортов."},{OVERLAY,L"Оранжевый: Full. Голубой: Empty. Проверьте неподвижные части кузова."},{REGION_SELECT,L"Вид сверху: выделите кузов мышью. Восстановление пропусков можно отключить в настройках."},{OPTIONS,L"Слои просмотра: Full, Empty, груз, серый фон и две заливки по воде. Параметры расчёта доступны отдельным пунктом меню."},{CONTEXT_POINTS,L"Показать остальные точки исходного Full серыми, включая точки вне области расчёта. Груз остаётся цветным; м³ не меняются."},{CARGO,L"Показать выделенный груз или полную карту разности высот."},{REPORT_SAVE,L"Сохранить PDF или HTML с изображением, объёмом, покрытием и параметрами расчёта."}}){TOOLINFOW tool{};tool.cbSize=sizeof(tool);tool.uFlags=TTF_IDISHWND|TTF_SUBCLASS;tool.hwnd=mainWin;tool.uId=(UINT_PTR)mainControl(id);tool.lpszText=const_cast<wchar_t*>(text);SendMessageW(tips,TTM_ADDTOOLW,0,(LPARAM)&tool);}
 
 }
 
-struct SettingsDialog {double threshold=50;bool largest=true,clean=true;HWND w=nullptr;bool done=false,accepted=false;Region roi;CompareOptions options;};
+struct SettingsDialog {int test=0;double threshold=50;bool largest=true,clean=true;HWND w=nullptr;bool done=false,accepted=false;Region roi;CompareOptions options;};
 LRESULT CALLBACK SettingsProc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
     auto d=(SettingsDialog*)GetWindowLongPtrW(w,GWLP_USERDATA);
     if(msg==WM_NCCREATE){d=(SettingsDialog*)((CREATESTRUCTW*)lp)->lpCreateParams;SetWindowLongPtrW(w,GWLP_USERDATA,(LONG_PTR)d);}
+    if(msg==WM_TIMER&&d->test){KillTimer(w,1);auto check=GetDlgItem(w,221);auto before=SendMessageW(check,BM_GETCHECK,0,0);SendMessageW(check,BM_CLICK,0,0);if(SendMessageW(check,BM_GETCHECK,0,0)==before)std::ofstream(renderTestDir/L"settings-check-error.txt")<<"Checkbox click failed";SendMessageW(check,BM_CLICK,0,0);captureSettingsDialog(w,renderTestDir/(lightTheme?L"calculation-light.bmp":L"calculation-dark.bmp"));DestroyWindow(w);return 0;}
     if(msg==WM_COMMAND&&LOWORD(wp)==IDOK){try{
         auto number=[&](int id){wchar_t b[128]{};GetDlgItemTextW(w,id,b,128);std::wstring s=b;std::replace(s.begin(),s.end(),L',',L'.');wchar_t* end=nullptr;double value=wcstod(s.c_str(),&end);while(end&&iswspace(*end))++end;if(end==s.c_str()||!end||*end||!std::isfinite(value))throw std::runtime_error("Enter valid numbers in all fields");return value;};
         CompareOptions o=d->options;o.step=number(201);int units=int(SendDlgItemMessageW(w,202,CB_GETCURSEL,0,0));o.metresPerUnit=units==1?.001:units==2?.01:units==3?1:0;
@@ -93,30 +111,31 @@ LRESULT CALLBACK SettingsProc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
     if(msg==WM_DESTROY){d->done=true;return 0;}
     return DefWindowProcW(w,msg,wp,lp);
 }
-bool settings(){
-    if(activeDocument<0)return false;SettingsDialog d;d.threshold=cargoThreshold;d.largest=cargoLargest;d.clean=cargoClean;d.options=compareOptions;d.roi=region.enabled?region:bounds(documents[activeDocument].data);if(!region.enabled){d.roi.enabled=false;d.roi.z0=-1e12;d.roi.z1=1e12;}
+bool settings(int test=0){
+    if(activeDocument<0)return false;SettingsDialog d;d.test=test;d.threshold=cargoThreshold;d.largest=cargoLargest;d.clean=cargoClean;d.options=compareOptions;d.roi=region.enabled?region:bounds(documents[activeDocument].data);if(!region.enabled){d.roi.enabled=false;d.roi.z0=-1e12;d.roi.z1=1e12;}
     HINSTANCE inst=GetModuleHandleW(nullptr);WNDCLASSW wc{};wc.hInstance=inst;wc.lpfnWndProc=SettingsProc;wc.lpszClassName=L"LaseV2Settings";wc.hCursor=LoadCursor(nullptr,IDC_ARROW);wc.hbrBackground=(HBRUSH)(COLOR_BTNFACE+1);RegisterClassW(&wc);
     RECT parent;GetWindowRect(mainWin,&parent);d.w=CreateWindowExW(WS_EX_DLGMODALFRAME,L"LaseV2Settings",L"Область и параметры сравнения",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU,parent.left+80,parent.top+40,660,800,mainWin,nullptr,inst,&d);
     auto control=[&](const wchar_t* cls,const std::wstring& text,int id,int x,int y,int width,int height,DWORD style=0){HWND c=CreateWindowW(cls,text.c_str(),WS_CHILD|WS_VISIBLE|style,x,y,width,height,d.w,(HMENU)(INT_PTR)id,inst,nullptr);SendMessageW(c,WM_SETFONT,(WPARAM)font,TRUE);return c;};
     auto edit=[&](const wchar_t* name,int id,double value,int y){control(L"STATIC",name,0,22,y+4,310,24);control(L"EDIT",num(value,6),id,350,y,260,28,WS_BORDER|WS_TABSTOP|ES_AUTOHSCROLL);};
     edit(L"Шаг сетки XY (в единицах файла)",201,d.options.step,20);
     control(L"STATIC",L"Физическая единица координат",0,22,65,310,24);auto unit=control(L"COMBOBOX",L"",202,350,60,260,180,CBS_DROPDOWNLIST|WS_TABSTOP);
-    for(auto s:{L"Не подтверждена — объём в ед.³",L"Миллиметры (проверьте масштаб)",L"Сантиметры",L"Метры"})SendMessageW(unit,CB_ADDSTRING,0,(LPARAM)s);SendMessageW(unit,CB_SETCURSEL,d.options.metresPerUnit==.001?1:d.options.metresPerUnit==.01?2:d.options.metresPerUnit==1?3:0,0);
-    control(L"STATIC",L"Высота поверхности в ячейке",0,22,105,310,24);auto method=control(L"COMBOBOX",L"",203,350,100,260,150,CBS_DROPDOWNLIST|WS_TABSTOP);for(auto s:{L"Максимальная высота",L"Средняя высота",L"Минимальная высота",L"Медиана — устойчиво к выбросам",L"Нижняя поверхность — проверено по n-gk"})SendMessageW(method,CB_ADDSTRING,0,(LPARAM)s);SendMessageW(method,CB_SETCURSEL,d.options.estimator,0);
+    for(auto s:{L"Не подтверждена — объём в ед.³",L"Миллиметры",L"Сантиметры",L"Метры"})SendMessageW(unit,CB_ADDSTRING,0,(LPARAM)s);SendMessageW(unit,CB_SETCURSEL,d.options.metresPerUnit==.001?1:d.options.metresPerUnit==.01?2:d.options.metresPerUnit==1?3:0,0);
+    control(L"STATIC",L"Как определять высоту поверхности",0,22,105,310,24);auto method=control(L"COMBOBOX",L"",203,350,100,260,150,CBS_DROPDOWNLIST|WS_TABSTOP);for(auto s:{L"Максимальная высота",L"Средняя высота",L"Минимальная высота",L"Медиана — устойчиво к выбросам",L"Нижняя поверхность"})SendMessageW(method,CB_ADDSTRING,0,(LPARAM)s);SendMessageW(method,CB_SETCURSEL,d.options.estimator,0);
     edit(L"Сдвиг базового скана по X",204,d.options.dx,140);edit(L"Сдвиг базового скана по Y",205,d.options.dy,177);edit(L"Сдвиг базового скана по Z",206,d.options.dz,214);
-    control(L"BUTTON",L"Подтверждаю общие оси и совмещение сканов с учётом поворота и сдвига",207,22,255,600,30,BS_AUTOCHECKBOX|WS_TABSTOP);CheckDlgButton(d.w,207,d.options.aligned?BST_CHECKED:BST_UNCHECKED);
+    control(L"BUTTON",L"Совмещение проверено: Full и Empty имеют общие оси",207,22,255,600,30,BS_AUTOCHECKBOX|WS_TABSTOP);CheckDlgButton(d.w,207,d.options.aligned?BST_CHECKED:BST_UNCHECKED);
     control(L"BUTTON",L"Ограничить область расчёта и просмотра",208,22,299,580,30,BS_AUTOCHECKBOX|WS_TABSTOP);CheckDlgButton(d.w,208,d.roi.enabled?BST_CHECKED:BST_UNCHECKED);
     const wchar_t* names[]={L"X от",L"X до",L"Y от",L"Y до",L"Z от",L"Z до"};double values[]={d.roi.x0,d.roi.x1,d.roi.y0,d.roi.y1,d.roi.z0,d.roi.z1};
     for(int i=0;i<6;i++){int x=22+(i%2)*310,y=342+(i/2)*42;control(L"STATIC",names[i],0,x,y+4,60,26);control(L"EDIT",num(values[i],3),210+i,x+65,y,220,28,WS_BORDER|WS_TABSTOP|ES_AUTOHSCROLL);}
-    control(L"STATIC",L"Порог ΔZ для груза (ед. файла)",0,22,473,310,26);control(L"EDIT",num(d.threshold,3),216,350,469,260,28,WS_BORDER|WS_TABSTOP|ES_AUTOHSCROLL);
+    control(L"STATIC",L"Минимальная высота груза над Empty",0,22,473,310,26);control(L"EDIT",num(d.threshold,3),216,350,469,260,28,WS_BORDER|WS_TABSTOP|ES_AUTOHSCROLL);
     control(L"BUTTON",L"Только крупнейшая связная область груза",217,22,503,580,26,BS_AUTOCHECKBOX|WS_TABSTOP);CheckDlgButton(d.w,217,d.largest?BST_CHECKED:BST_UNCHECKED);
     edit(L"Поворот базы вокруг Z (градусы)",218,d.options.angle,537);
-    control(L"BUTTON",L"Отсекать борта, выбросы и узкие полосы (проверяйте область)",219,22,576,600,28,BS_AUTOCHECKBOX|WS_TABSTOP);CheckDlgButton(d.w,219,d.clean?BST_CHECKED:BST_UNCHECKED);
+    control(L"BUTTON",L"Исключать борта кузова, выбросы и узкие полосы",219,22,576,600,28,BS_AUTOCHECKBOX|WS_TABSTOP);CheckDlgButton(d.w,219,d.clean?BST_CHECKED:BST_UNCHECKED);
     control(L"BUTTON",L"Восстанавливать короткие и замкнутые пропуски",220,22,611,600,28,BS_AUTOCHECKBOX|WS_TABSTOP);CheckDlgButton(d.w,220,d.options.reconstructGaps?BST_CHECKED:BST_UNCHECKED);
     control(L"BUTTON",L"Автоматически выбирать шаг по плотности и пропускам",221,22,642,600,28,BS_AUTOCHECKBOX|WS_TABSTOP);CheckDlgButton(d.w,221,d.options.adaptiveGrid?BST_CHECKED:BST_UNCHECKED);
-    control(L"BUTTON",L"Уточнять оценку по контрольным измерениям",222,22,673,600,28,BS_AUTOCHECKBOX|WS_TABSTOP);CheckDlgButton(d.w,222,d.options.calibratedEstimate?BST_CHECKED:BST_UNCHECKED);
+    control(L"BUTTON",L"Использовать уточнённую модель оценки объёма",222,22,673,600,28,BS_AUTOCHECKBOX|WS_TABSTOP);CheckDlgButton(d.w,222,d.options.calibratedEstimate?BST_CHECKED:BST_UNCHECKED);
     control(L"BUTTON",L"Применить",IDOK,342,711,130,38,BS_DEFPUSHBUTTON|WS_TABSTOP);control(L"BUTTON",L"Отмена",IDCANCEL,482,711,130,38,BS_PUSHBUTTON|WS_TABSTOP);
-    EnableWindow(mainWin,FALSE);ShowWindow(d.w,SW_SHOW);MSG msg;while(!d.done&&GetMessageW(&msg,nullptr,0,0)>0)if(!IsDialogMessageW(d.w,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}EnableWindow(mainWin,TRUE);SetActiveWindow(mainWin);
+    for(auto [id,text]:std::initializer_list<std::pair<int,const wchar_t*>>{{201,L"Размер ячейки в координатах BIN. Меньший шаг даёт больше деталей, но увеличивает время расчёта."},{202,L"Масштаб исходного BIN. Влияет на перевод результата в м³. Для файлов LASE обычно нужны миллиметры."},{203,L"Способ выбора высоты по точкам ячейки. Рекомендуется нижняя поверхность; меняйте только для проверки нестандартного скана."},{207,L"Включайте после проверки наложения. Подтверждение не выполняет автоматическое совмещение."},{208,L"Расчёт и просмотр будут ограничены введёнными границами X, Y, Z."},{216,L"Минимальная разница высот Full и Empty для выделения груза. Значение задано в единицах BIN."},{217,L"Оставляет крупнейший участок груза. Отключите, если груз состоит из нескольких отдельных куч."},{219,L"Исключает точки кузова и шум. Проверьте результат в слоях просмотра."},{220,L"Заполняет только небольшие пропуски, подтверждённые соседними точками."},{221,L"Программа сама уточняет сетку с учётом плотности точек."},{222,L"Применяет заранее обученную оценочную модель. Загруженная SQ3 не подставляет контрольный объём в результат."}})settingsTip(d.w,GetDlgItem(d.w,id),text);
+    EnableWindow(mainWin,FALSE);skinSettings(d.w);ShowWindow(d.w,SW_SHOW);if(test)SetTimer(d.w,1,100,nullptr);MSG msg;while(!d.done&&GetMessageW(&msg,nullptr,0,0)>0)if(!IsDialogMessageW(d.w,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}EnableWindow(mainWin,TRUE);SetActiveWindow(mainWin);
     if(d.accepted){applyRegion(d.roi);compareOptions=d.options;cargoThreshold=d.threshold;cargoLargest=d.largest;cargoClean=d.clean;invalidateComparison();compileLists();redraw();}return d.accepted;
 }
 #include "layers_ui.hpp"
@@ -198,9 +217,21 @@ void v2Command(int id,int notification){
 try{
     if(busy)return;
     switch(id){
-    case ACTIVE_FILE:if(notification==CBN_SELCHANGE)selectDocument(int(SendDlgItemMessageW(mainWin,id,CB_GETCURSEL,0,0)));break;
-    case BASE_FILE:if(notification==CBN_SELCHANGE){compareOptions.aligned=false;compareOptions.provisional=false;compareOptions.alignmentOverlap=-1;compareOptions.rimHeightAdjustment=0;compareOptions.bedHeightAdjustment=compareOptions.bedHeightSpread=0;compareOptions.bedHeightVariants=0;compareOptions.angle=compareOptions.dx=compareOptions.dy=compareOptions.dz=0;baseDocument=int(SendDlgItemMessageW(mainWin,id,CB_GETCURSEL,0,0))-1;invalidateComparison();compileLists();redraw();}break;
-    case CLOSE_FILE:if(activeDocument>=0){int removed=activeDocument;documents.erase(documents.begin()+removed);if(baseDocument==removed)baseDocument=-1;else if(baseDocument>removed)--baseDocument;invalidateComparison();if(documents.empty()){model={};region={};loadedPath.clear();activeDocument=-1;compileLists();updateFileLists();redraw();}else selectDocument(std::min(removed,int(documents.size())-1));}break;
+    case ACTIVE_FILE:if(notification==CBN_SELCHANGE){int selected=selectedFile(id);if(selected>=0)selectDocument(selected);else updateFileLists();}break;
+    case BASE_FILE:if(notification==CBN_SELCHANGE){compareOptions.aligned=false;compareOptions.provisional=false;compareOptions.alignmentOverlap=-1;compareOptions.rimHeightAdjustment=0;compareOptions.bedHeightAdjustment=compareOptions.bedHeightSpread=0;compareOptions.bedHeightVariants=0;compareOptions.angle=compareOptions.dx=compareOptions.dy=compareOptions.dz=0;baseDocument=selectedFile(id);if(activeDocument>=0&&documents[activeDocument].data.kind!=2&&baseDocument>=0)selectDocument(baseDocument);invalidateComparison();compileLists();redraw();}break;
+    case CLOSE_FILE:case CLOSE_BASE:{
+        int removed=selectedFile(id==CLOSE_FILE?ACTIVE_FILE:BASE_FILE);if(removed<0||busy)break;
+        bool wasActive=activeDocument==removed;documents.erase(documents.begin()+removed);
+        if(baseDocument==removed)baseDocument=-1;else if(baseDocument>removed)--baseDocument;
+        if(activeDocument>removed)--activeDocument;
+        invalidateComparison();
+        if(wasActive){activeDocument=-1;for(int i=0;i<int(documents.size());++i)if(documents[i].data.kind==2){activeDocument=i;break;}
+            if(activeDocument<0)activeDocument=baseDocument;
+            if(activeDocument>=0)selectDocument(activeDocument);
+            else{model={};region={};loadedPath.clear();compileLists();updateFileLists();SetWindowTextW(mainWin,applicationTitle);redraw();}
+        }else{compileLists();updateFileLists();redraw();}
+        status(id==CLOSE_FILE?L"Full закрыт":L"Empty / Reference закрыт");break;
+    }
     case WATER:scanLayers.enabled=false;if(comparison){if(!water.available){status(waterSummary());MessageBoxW(mainWin,waterSummary().c_str(),L"Заполнение по бортам",MB_ICONINFORMATION);break;}lockedFrame=currentViewBounds();showWater=!showWater;cargoView=true;differenceView=overlayView=false;compileLists();status(showWater?waterSummary():comparisonSummary());redraw();}break;
     case CONTEXT_POINTS:scanLayers.enabled=false;if(comparison){lockedFrame=currentViewBounds();showContext=!cargoView||!showContext;cargoView=true;differenceView=overlayView=false;compileLists();status(comparisonSummary());redraw();}break;
     case CARGO:scanLayers.enabled=false;if(comparison){cargoView=!cargoView;differenceView=!cargoView;overlayView=false;compileLists();status(comparisonSummary());}break;
@@ -239,7 +270,7 @@ void runCaptionRefreshTest(){try{
 }catch(const std::exception& e){std::ofstream(renderTestDir/L"caption-error.txt")<<e.what();}}
 
 void runV2Test(){try{
-    wchar_t title[1024];GetWindowTextW(mainWin,title,1024);if(GetMenu(mainWin)||std::wstring(title).find(L"[Version: 3.34.0]")==std::wstring::npos)throw std::runtime_error("Menu or version title failed");
+    wchar_t title[1024];GetWindowTextW(mainWin,title,1024);if(GetMenu(mainWin)||std::wstring(title).find(L"[Version: 3.35.18]")==std::wstring::npos)throw std::runtime_error("Menu or version title failed");
     if(!std::filesystem::exists(preferencesFile())&&lightTheme)throw std::runtime_error("Default theme must be dark");
     std::filesystem::create_directories(renderTestDir);
     sidebarTests();
@@ -250,7 +281,7 @@ void runV2Test(){try{
     yaw=pitch=0;zoom=1;panX=panY=0;render();selectRegion=true;selectionStart={viewW/5,viewH/5};selectionEnd={viewW*4/5,viewH*4/5};finishRegion();if(!region.enabled)throw std::runtime_error("Mouse region selection failed");applyRegion({});reset();
     {auto heading=view::heading(documents[activeDocument].data);double savedVolume=cargo.volume;
         command(FRONT);if(std::abs(yaw-(90-heading))>1e-4||pitch!=90)throw std::runtime_error("Front preset is not across bed width");writeBytes(renderTestDir/L"front.png",capturePng());
-        command(SIDE);if(std::abs(yaw+heading)>1e-4||pitch!=90||cargo.volume!=savedVolume)throw std::runtime_error("Side preset is not along bed length");writeBytes(renderTestDir/L"side.png",capturePng());reset();
+        command(SIDE);if(std::abs(yaw+heading)>1e-4||pitch!=90||cargo.volume!=savedVolume)throw std::runtime_error("Side preset is not along bed length");writeBytes(renderTestDir/L"side.png",capturePng());reset();render();if(std::abs(yaw-(165-heading))>1e-4||pitch!=55||cargo.volume!=savedVolume)throw std::runtime_error("Overview direction or volume failed");writeBytes(renderTestDir/L"general.png",capturePng());
     }
     yaw=37;pitch=28;zoom=1.6f;panX=.17f;panY=-.11f;render();auto initialFrame=currentViewBounds();float initialScale=orthoHeight;
     auto verifyCamera=[&]{render();auto frame=currentViewBounds();if(yaw!=37||pitch!=28||zoom!=1.6f||panX!=.17f||panY!=-.11f||orthoHeight!=initialScale||frame.lo.x!=initialFrame.lo.x||frame.lo.y!=initialFrame.lo.y||frame.lo.z!=initialFrame.lo.z||frame.hi.x!=initialFrame.hi.x||frame.hi.y!=initialFrame.hi.y||frame.hi.z!=initialFrame.hi.z)throw std::runtime_error("Alignment/calculation changed camera or frame");};
@@ -302,15 +333,12 @@ void runV2Test(){try{
             if(cargo.volume!=volume||oldYaw!=yaw||oldPitch!=pitch||scale!=orthoHeight)throw std::runtime_error("Tarp changed total or camera");
             t.tarp=false;applyScanLayers(t);render();applyScanLayers(keep);
         }
+        {bool before=lightTheme;applyTheme(false);settings(1);applyTheme(true);settings(1);applyTheme(before);}
         auto calcBefore=displayedVolume();auto db=documents[activeDocument].path.parent_path()/L"TVM_Measurement_Data_Base.sq3";
         if(std::filesystem::exists(db)){loadControlDatabase(db);auto match=currentControl();if(!match.record||controlLines().size()<3)throw std::runtime_error("Database comparison failed");if(displayedVolume()!=calcBefore||cargo.volume!=volume||oldYaw!=yaw||oldPitch!=pitch||scale!=orthoHeight)throw std::runtime_error("Database changed calculated result or camera");}
         v2Command(THEME_LIGHT);v2Command(FORMAT_PDF);if(!lightTheme||reportFormat!=ReportFormat::PDF)throw std::runtime_error("Preferences failed");saveCaptionTest(renderTestDir/L"caption-light.png");saveInterface(renderTestDir/L"theme-light.bmp");writeBytes(renderTestDir/L"theme-light.png",capturePng());writePdfReport(renderTestDir/L"report.pdf");writeReport(renderTestDir/L"control-report.html");
         v2Command(THEME_DARK);v2Command(FORMAT_HTML);if(lightTheme||reportFormat!=ReportFormat::HTML||displayedVolume()!=calcBefore||cargo.volume!=volume||oldYaw!=yaw||oldPitch!=pitch||scale!=orthoHeight)throw std::runtime_error("Theme changed result or camera");saveCaptionTest(renderTestDir/L"caption-dark.png");saveInterface(renderTestDir/L"theme-dark.bmp");writeBytes(renderTestDir/L"theme-dark.png",capturePng());
-        computeSettings(1);auto chosen=compute::selected.load();
-        if(chosen!=(compute::runtime().ready?compute::Backend::GPU:compute::Backend::CPU))throw std::runtime_error("Compute dialog apply failed");
-        if(scale!=orthoHeight||oldYaw!=yaw||oldPitch!=pitch||oldZoom!=zoom||oldX!=panX||oldY!=panY||cargo.volume!=volume||!comparison)throw std::runtime_error("Compute dialog changed view or volume");
-        computeSettings(2);if(compute::selected.load()!=chosen)throw std::runtime_error("Compute dialog cancel failed");
-        computeSettings(3);if(compute::selected.load()!=compute::Backend::CPU)throw std::runtime_error("Compute dialog CPU selection failed");
+        if(compute::selected.load()!=compute::Backend::CPU)throw std::runtime_error("Viewer must use CPU calculations");
         auto saved=scanLayers;layerSettings(2);if(scanLayers.full!=saved.full||scanLayers.cargo!=saved.cargo||scanLayers.fullWater!=saved.fullWater)throw std::runtime_error("Layer dialog cancel lost state");
         ScanLayers level;level.enabled=true;level.cargo=false;level.other=true;level.fullWater=fullWater.available;applyScanLayers(level);render();saveInterface(renderTestDir/L"water-level.bmp");writeBytes(renderTestDir/L"water-level.png",capturePng());
         bool zoneBefore=showZone,gridBefore=grid;float zoneYaw=yaw,zonePitch=pitch,zoneZoom=zoom,zoneX=panX,zoneY=panY;
@@ -337,5 +365,24 @@ void runV2Test(){try{
     v2Command(CONTEXT_POINTS);render();auto after=currentViewBounds();if(yaw!=37||pitch!=28||zoom!=1.6f||panX!=.17f||panY!=-.11f||orthoHeight!=scaleBefore||before.lo.x!=after.lo.x||before.lo.y!=after.lo.y||before.lo.z!=after.lo.z||before.hi.x!=after.hi.x||before.hi.y!=after.hi.y||before.hi.z!=after.hi.z)throw std::runtime_error("Showing context changed camera");saveInterface(renderTestDir/L"cargo-context.bmp");writeBytes(renderTestDir/L"cargo-context.png",capturePng());writeReport(renderTestDir/L"context-report.html");mesh=true;saveInterface(renderTestDir/L"cargo-context-surface.bmp");mesh=false;v2Command(CONTEXT_POINTS);render();if(orthoHeight!=scaleBefore||zoom!=1.6f||panX!=.17f||panY!=-.11f||yaw!=37||pitch!=28)throw std::runtime_error("Hiding context changed camera");reset();if(cargo.volume!=savedVolume||cargo.cloud.points.size()!=savedPoints)throw std::runtime_error("Context view changed cargo analysis");
     auto summary=comparisonSummary();selectDocument(1);if(comparison||region.enabled||compareOptions.aligned)throw std::runtime_error("Stale analysis after switching files");selectDocument(0);if(model.points.size()!=originalCount)throw std::runtime_error("Original scan was modified");
     {int active=activeDocument;auto next=documents[1].data;next.kind=3;next.scan=999999;pendingPath=documents[1].path;pendingBaseOnly=true;replacing=false;acceptLoaded(std::move(next));if(activeDocument!=active||baseDocument!=int(documents.size())-1)throw std::runtime_error("Explicit reference did not replace the base");size_t count=documents.size();pendingBaseOnly=true;bool rejected=false;try{acceptLoaded(documents[active].data);}catch(const std::exception&){rejected=true;}if(!rejected||pendingBaseOnly||documents.size()!=count)throw std::runtime_error("Explicit base accepted Full");}
+    {
+        auto full=documents[0].data,empty=documents[1].data;auto fullPath=documents[0].path,emptyPath=documents[1].path;
+        documents.clear();activeDocument=baseDocument=-1;model={};loadQueue.clear();invalidateComparison();replacing=false;pendingBaseOnly=true;pendingPath=emptyPath;acceptLoaded(empty);
+        if(baseDocument!=0||selectedFile(BASE_FILE)!=0||selectedFile(ACTIVE_FILE)!=-1||SendMessageW(mainControl(ACTIVE_FILE),CB_GETCOUNT,0,0)!=1||IsWindowEnabled(mainControl(COMPARE)))throw std::runtime_error("Empty-first file roles failed");
+        saveInterface(renderTestDir/L"empty-first.bmp");
+        pendingPath=fullPath;acceptLoaded(full);
+        if(activeDocument!=1||baseDocument!=0||selectedFile(ACTIVE_FILE)!=1||selectedFile(BASE_FILE)!=0)throw std::runtime_error("Full after Empty did not retain the base");
+        auto ref=empty;ref.kind=3;ref.scan=999999;pendingPath=emptyPath;pendingBaseOnly=true;acceptLoaded(ref);
+        if(activeDocument!=1||baseDocument!=2||selectedFile(BASE_FILE)!=2||SendMessageW(mainControl(ACTIVE_FILE),CB_GETCOUNT,0,0)!=2||SendMessageW(mainControl(BASE_FILE),CB_GETCOUNT,0,0)!=3)throw std::runtime_error("Filtered file role lists failed");
+        SendMessageW(mainControl(BASE_FILE),CB_SETCURSEL,1,0);v2Command(BASE_FILE,CBN_SELCHANGE);
+        if(baseDocument!=0)throw std::runtime_error("Base selector document mapping failed");
+        SendMessageW(mainControl(ACTIVE_FILE),CB_SETCURSEL,1,0);v2Command(ACTIVE_FILE,CBN_SELCHANGE);
+        if(activeDocument!=1)throw std::runtime_error("Full selector document mapping failed");
+        v2Command(CLOSE_BASE,0);if(selectedFile(BASE_FILE)!=-1||selectedFile(ACTIVE_FILE)<0||model.kind!=2)throw std::runtime_error("Close base changed Full");
+        v2Command(CLOSE_FILE,0);if(selectedFile(ACTIVE_FILE)!=-1)throw std::runtime_error("Close Full did not clear Full selector");
+        std::ofstream(renderTestDir/L"close-controls-ok.txt")<<"PASS independent Full/base close controls";
+        std::ofstream(renderTestDir/L"file-roles-ok.txt")<<"PASS Empty-first, Full-after-Empty, explicit Reference and filtered selector item mapping";
+    }
+    {bool before=lightTheme;applyTheme(false);settingsMenu(1);applyTheme(true);settingsMenu(1);applyTheme(before);std::ofstream(renderTestDir/L"settings-ok.txt")<<"PASS themed settings hub in dark/light modes";}
     std::ofstream out(renderTestDir/L"v2-ok.txt");out<<utf8(summary)<<"\nPASS: multiple files, overlay, ROI, signed volume, PNG, HTML, PLY, state invalidation, sidebar layers, explicit reference and original preservation\n";
 }catch(const std::exception& e){std::ofstream(renderTestDir/L"v2-error.txt")<<e.what();}}

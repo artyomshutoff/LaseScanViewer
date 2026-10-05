@@ -24,7 +24,7 @@ std::filesystem::path renderTestDir;
 bool busy=false,mesh=false,grid=false; float yaw=160,pitch=45,zoom=1,panX=0,panY=0,pointSize=1,orthoHeight=1;
 POINT mouse{}; int dragging=0; GLuint pointList=0,faceList=0,textList=0,bigTextList=0; int viewW=1,viewH=1;
 unsigned captionSizeEvents=0;
-constexpr wchar_t applicationTitle[]=L"LaseScanViewer [Version: 3.34.0]";
+constexpr wchar_t applicationTitle[]=L"LaseScanViewer [Version: 3.35.18]";
 constexpr int OPEN=101,POINT_MODE=102,SURFACE=103,RESET=104,TOP=105,FRONT=106,SIDE=107,EXPORT=108,GRID=109,SMALL=110,LARGE=111,GROUP0=112,GROUP1=113;
 #include "v2_state.hpp"
 std::wstring widen(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),nullptr,0);std::wstring w(n,0);MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),w.data(),n);return w;}
@@ -33,7 +33,8 @@ void syncControls();
 void command(int id);
 void redraw(){syncControls();if(sidebarWin)InvalidateRect(sidebarWin,nullptr,FALSE);InvalidateRect(viewWin,nullptr,FALSE);InvalidateRect(mainWin,nullptr,FALSE);}
 ViewBounds currentViewBounds(){if(lockedFrame)return *lockedFrame;const Model& frame=cargoView&&showContext&&activeDocument>=0?documents[activeDocument].data:cargoView?cargo.geometry:model;return {frame.lo,frame.hi,!frame.points.empty()};}
-void reset(){lockedFrame.reset();yaw=160;pitch=45;zoom=1;panX=panY=0;redraw();}
+void presetView(view::Preset preset);
+void reset(){lockedFrame.reset();presetView(view::Preset::General);redraw();}
 #include "zone_preview.hpp"
 void compileLists(){
     const Model& scene=cargoView?cargo.geometry:model;
@@ -166,19 +167,20 @@ LRESULT CALLBACK ViewProc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
     return DefWindowProcW(w,msg,wp,lp);
 }
 #include "ui.hpp"
+#include "settings_skin.hpp"
 #include "v2.hpp"
 #include "sidebar_ui.hpp"
 void openWebViewer(){
  wchar_t path[32768]{};GetModuleFileNameW(nullptr,path,32768);auto dir=std::filesystem::path(path).parent_path();
  auto exe=dir/(sizeof(void*)==4?L"LaseScanViewer-Web-Portable.exe":L"LaseScanViewer-Web.exe");
  if(!std::filesystem::exists(exe)){MessageBoxW(mainWin,L"Веб-просмотрщик не найден. Распакуйте полный архив программы в одну папку.",L"Веб-интерфейс",MB_ICONINFORMATION);return;}
- std::wstring args;for(int i:{activeDocument,baseDocument})if(i>=0&&i<int(documents.size()))args+=L"\""+documents[i].path.wstring()+L"\" ";
+ std::wstring args=L"--port "+std::to_wstring(webprefs::port())+L" ";for(int i:{activeDocument,baseDocument})if(i>=0&&i<int(documents.size()))args+=L"\""+documents[i].path.wstring()+L"\" ";
  if((INT_PTR)ShellExecuteW(mainWin,L"open",exe.c_str(),args.c_str(),dir.c_str(),SW_HIDE)<=32)MessageBoxW(mainWin,L"Не удалось запустить локальный веб-просмотрщик.",L"Веб-интерфейс",MB_ICONERROR);
 }
 void presetView(view::Preset preset){
  const Model& original=activeDocument>=0?documents[activeDocument].data:model;
  auto angles=view::preset(preset,view::heading(original));yaw=float(angles.yaw);pitch=float(angles.pitch);panX=panY=0;zoom=1;
- auto frame=currentViewBounds();if(frame.valid){auto fit=view::fit(cargoView?cargo.geometry:model,angles,frame.lo,frame.hi,double(viewW)/viewH);zoom=float(fit.zoom);panX=float(fit.x);panY=float(fit.y);}
+ auto frame=currentViewBounds();if(frame.valid){auto fit=view::fit(preset==view::Preset::General?view::frameCorners(frame.lo,frame.hi):cargoView?cargo.geometry:model,angles,frame.lo,frame.hi,double(viewW)/std::max(1,viewH),preset==view::Preset::General?std::clamp(1.-220./std::max(1,viewW),.35,1/1.15):1/1.15,preset==view::Preset::General?std::clamp(1.-100./std::max(1,viewH),.35,1/1.15):1/1.15);zoom=float(fit.zoom);panX=float(fit.x);panY=float(fit.y);}
 }
 void command(int id){
     switch(id){case WEB_VIEW:openWebViewer();break;case GROUP0:if(!loadedPath.empty()&&(model.availableTypes&1))startLoad(loadedPath,0);break;case GROUP1:if(!loadedPath.empty()&&(model.availableTypes&2))startLoad(loadedPath,1);break;case OPEN:openFile();break;case POINT_MODE:mesh=false;break;case SURFACE:mesh=true;break;case RESET:reset();break;case TOP:presetView(view::Preset::Top);break;case FRONT:presetView(view::Preset::Front);break;case SIDE:presetView(view::Preset::Side);break;case EXPORT:saveFile();break;case GRID:showZone=!showZone;break;case SMALL:pointSize=std::max(1.f,pointSize-1);break;case LARGE:pointSize=std::min(8.f,pointSize+1);break;}
@@ -217,18 +219,19 @@ int WINAPI wWinMain(HINSTANCE inst,HINSTANCE,PWSTR,int show){
     smallFont=CreateFontW(-13,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");numberFont=CreateFontW(-22,0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
     createSidebar(inst);
     auto button=[&](int id,const wchar_t* title,int x,int y,int width,int height=38){HWND b=CreateWindowW(L"BUTTON",title,WS_VISIBLE|WS_CHILD|WS_TABSTOP|BS_OWNERDRAW,x,y,width,height,sidebarWin,(HMENU)(INT_PTR)id,inst,nullptr);SetPropW(b,L"SidebarY",(HANDLE)(INT_PTR)(y+1));SendMessageW(b,WM_SETFONT,(WPARAM)font,TRUE);SetWindowSubclass(b,ButtonSkinProc,1,0);};
-    button(OPEN,L"Открыть Full / пару",20,112,216,38);button(CLOSE_FILE,L"×",244,112,36,38);
+    button(OPEN,L"Открыть Full / пару",20,112,260,38);
     button(OPEN_EMPTY,L"Открыть Empty / Reference",20,158,260,38);
     button(TOP,L"Сверху",20,234,81,34);button(FRONT,L"Спереди",109,234,82,34);button(SIDE,L"Сбоку",199,234,81,34);
-    button(RESET,L"Общий вид   ·   R",20,276,260,34);
+    button(RESET,L"Общий вид",20,276,260,34);
     createSidebarLayers(inst);
     button(POINT_MODE,L"Точки",20,618,126,34);button(SURFACE,L"Поверхность",154,618,126,34);
     button(GROUP1,L"Набор 1",20,660,126,32);button(GROUP0,L"Набор 0",154,660,126,32);
-    button(SMALL,L"−",200,704,36,30);button(LARGE,L"+",244,704,36,30);
-    button(LOAD_DATABASE,L"Загрузить базу SQ3",20,752,260,34);
-    button(MANUAL_CALC,L"Обмеры кузова",20,794,260,34);
-    button(WEB_VIEW,L"Открыть в браузере",20,836,260,34);
-    button(EXPORT,L"Экспортировать PLY",20,904,260,34);
+    for(int id:{POINT_MODE,SURFACE,GROUP1,GROUP0})ShowWindow(mainControl(id),SW_HIDE);
+    button(SMALL,L"−",200,608,36,30);button(LARGE,L"+",244,608,36,30);
+    button(LOAD_DATABASE,L"Загрузить базу SQ3",20,656,260,34);
+    button(MANUAL_CALC,L"Обмеры кузова",20,698,260,34);
+    button(WEB_VIEW,L"Открыть в браузере",20,740,260,34);
+    button(EXPORT,L"Экспортировать PLY",20,808,260,34);
     // Legacy shortcuts remain available to the existing command/test paths.
     button(CARGO,L"Только груз",0,0,1,1);ShowWindow(mainControl(CARGO),SW_HIDE);
     button(CONTEXT_POINTS,L"Остальные точки",0,0,1,1);ShowWindow(mainControl(CONTEXT_POINTS),SW_HIDE);

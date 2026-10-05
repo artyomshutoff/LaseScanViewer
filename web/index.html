@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LaseScanViewer Web · 3.34.0</title><link rel="stylesheet" href="/style.css"><script defer src="/manual.js"></script><script defer src="/viewer.js"></script></head>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LaseScanViewer Web · 3.35.18</title><link rel="stylesheet" href="/style.css"><script defer src="/manual.js"></script><script defer src="/viewer.js"></script></head>
 <body>
 <aside>
- <div class="brand"><img src="/logo.svg" alt="LASE"><strong>ScanViewer <span>WEB</span></strong><small>Версия 3.34.0 · локальный просмотр</small></div>
+ <div class="brand"><img src="/logo.svg" alt="LASE"><strong>ScanViewer <span>WEB</span></strong><small>Версия 3.35.18 · локальный просмотр</small></div>
  <button id="openFull" class="primary">Открыть Full / пару</button><input id="fullFile" type="file" accept=".bin" multiple hidden>
  <button id="openEmpty">Открыть Empty / Reference</button><input id="emptyFile" type="file" accept=".bin" hidden>
- <section><h2>Ракурс</h2><div class="three"><button id="top">Сверху</button><button id="front">Спереди</button><button id="side">Сбоку</button></div><button id="reset">Общий вид · R</button></section>
+ <section><h2>Ракурс</h2><div class="three"><button id="top">Сверху</button><button id="front">Спереди</button><button id="side">Сбоку</button></div><button id="reset">Общий вид</button></section>
  <section><h2>Слои просмотра</h2>
   <label><input type="checkbox" id="full" checked> Полный скан</label>
   <label><input type="checkbox" id="empty"> Пустой кузов</label>
@@ -14,17 +14,17 @@
   <label><input type="checkbox" id="water"> По воде · пустой кузов <span id="waterValue"></span></label>
   <label><input type="checkbox" id="loadedWater"> По воде · над грузом <span id="loadedValue"></span></label>
   <label><input type="checkbox" id="tarp"> Тент · выше бортов <span id="tarpValue"></span></label>
-  <label><input type="checkbox" id="zone" checked> Зона интереса · X, Y, Z</label>
+  <label><input type="checkbox" id="zone" checked> Зона интереса</label>
  </section>
- <section><h2>Отображение</h2><div class="setting"><label for="mode">Геометрия</label><select id="mode"><option value="0">Точки</option><option value="1">Поверхность</option></select></div><div class="setting"><label for="pointSize">Размер точек</label><input id="pointSize" type="range" min="1" max="6" value="1"></div><div class="setting"><label for="theme">Тема</label><select id="theme"><option value="dark">Тёмная</option><option value="light">Светлая</option></select></div></section>
+ <section><select id="mode" hidden><option value="0">Точки</option><option value="1">Поверхность</option></select><div class="setting"><label for="pointSize">Размер точек</label><input id="pointSize" type="range" min="1" max="6" value="1"></div></section>
  <button id="openDatabase">Загрузить базу SQ3</button><input id="databaseFile" type="file" accept=".sq3,.sqlite,.db" hidden><small id="dbLabel">Контрольная база не загружена</small>
  <button id="manualButton">Обмеры кузова</button>
  <button id="stop" class="quiet">Закрыть веб-сессию</button>
 </aside>
 <main>
  <header><div><h1>Просмотр 3D-сканов</h1><p id="pair">Откройте Full и Empty для сравнения</p></div><span id="badge">ГОТОВО</span></header>
- <div class="files"><div><span>С грузом</span><strong id="fullName">Full не выбран</strong><select id="fullGroup" aria-label="Набор Full" disabled><option value="-1">Авто</option></select></div><div><span>Пустой кузов</span><strong id="emptyName">Empty / Reference не выбран</strong><select id="emptyGroup" aria-label="Набор Empty" disabled><option value="-1">Авто</option></select></div></div>
- <div class="toolbar"><button id="calculate" class="primary" disabled>Рассчитать объём</button><button id="align" disabled>Совместить</button><button id="compare" disabled>Сравнить</button><button id="settingsButton">Параметры расчёта</button><div class="spacer"></div><button id="png" disabled>PNG</button><button id="report" disabled>Отчёт HTML</button></div>
+ <div class="files"><div><span>С грузом</span><strong id="fullName">Full не выбран</strong><select hidden id="fullGroup" aria-label="Набор Full" disabled><option value="-1">Авто</option></select></div><div><span>Пустой кузов</span><strong id="emptyName">Empty / Reference не выбран</strong><select hidden id="emptyGroup" aria-label="Набор Empty" disabled><option value="-1">Авто</option></select></div></div>
+ <div class="toolbar"><button id="calculate" class="primary" disabled>Рассчитать объём</button><button id="align" disabled>Совместить</button><button id="compare" disabled>Сравнить</button><button id="settingsButton">Настройки</button><div class="spacer"></div><button id="png" disabled>PNG</button><button id="report" disabled>Отчёт HTML</button></div>
  <div id="viewport" tabindex="0" aria-label="3D просмотр. ЛКМ вращает, Shift или ПКМ перемещает, колесо масштабирует">
   <canvas id="scan"></canvas><canvas id="axes"></canvas><div id="emptyHint"><div class="dotIcon">⠿</div><h2>Откройте скан с грузом</h2><p>Перетащите пару Full и Empty сюда</p><small>BIN · локальный расчёт · исходные файлы сохраняются</small></div>
   <div id="volumeLabel"></div><div id="dimensions"></div><div id="control"></div>
@@ -32,7 +32,21 @@
  <div id="work" hidden><div><span id="phase">Совмещение</span><strong id="percent">0%</strong></div><progress id="progress" max="100" value="0"></progress></div>
  <div id="message" role="status">Загрузка локальной сессии…</div><footer>ЛКМ: вращать · Shift+ЛКМ / ПКМ: сдвиг · Колесо: масштаб · Двойной щелчок: общий вид</footer>
 </main>
-<dialog id="settings"><form method="dialog"><h2>Параметры расчёта</h2><p>Изменения применятся при следующем расчёте.</p><label for="unit">Единицы координат BIN</label><select id="unit"><option value="0.001">Миллиметры</option><option value="0.01">Сантиметры</option><option value="1">Метры</option></select><small>Миллиметры выбраны по умолчанию. Проверьте масштаб файла.</small><label for="step">Шаг сетки, единицы файла</label><input id="step" type="number" value="100" min="10" max="2000" step="1"><label><input type="checkbox" id="adaptive" checked> Автоматическое уточнение сетки</label><label><input type="checkbox" id="gaps" checked> Восстановление поддержанных пропусков</label><label><input type="checkbox" id="estimate" checked> Уточнение оценки объёма</label><p class="small">Расчёт на CPU. Применяется тот же алгоритм, что и в настольной версии. База SQ3 используется только для сравнения.</p><button class="primary">Готово</button></form></dialog>
+<dialog id="settings" aria-labelledby="settingsTitle"><form method="dialog">
+ <header class="settingsHeader"><h2 id="settingsTitle">Настройки</h2><button class="settingsClose" aria-label="Закрыть настройки" title="Закрыть">×</button></header>
+ <div class="settingsBody">
+  <div class="settingsGrid">
+   <section><h3>Оформление</h3><label for="theme">Тема</label><select id="theme"><option value="dark">Тёмная</option><option value="light">Светлая</option></select></section>
+   <section><h3>Веб-интерфейс</h3><label for="webPort">Порт</label><div class="portRow"><input id="webPort" type="number" min="1" max="65535" step="1" value="3000"><button id="saveWebPort" type="button">Сохранить</button></div><small id="webAddress">Адрес появится при открытии настроек.</small></section>
+  </div>
+  <section><h3>Параметры расчёта</h3><div class="settingsGrid settingsFields"><div><label for="unit">Единицы координат BIN</label><select id="unit"><option value="0.001">Миллиметры</option><option value="0.01">Сантиметры</option><option value="1">Метры</option></select></div><div><label for="step">Шаг сетки, единицы файла</label><input id="step" type="number" value="100" min="10" max="2000" step="1"></div></div>
+   <div class="settingsChecks"><label><input type="checkbox" id="adaptive" checked> Автоматически выбирать точность сетки</label><label><input type="checkbox" id="gaps" checked> Заполнять небольшие пропуски</label><label><input type="checkbox" id="estimate" checked> Использовать уточнённую модель оценки</label></div>
+   <small>Параметры применяются при следующем расчёте.</small>
+  </section>
+  <details class="settingsHelp"><summary>О настройках</summary><p>Единицы BIN задают масштаб исходных координат для перевода объёма в м³. Обычно нужны миллиметры. Шаг сетки — размер ячейки: меньше шаг — больше деталей и дольше расчёт. Автоматическая точность выбирает шаг по плотности точек. Заполнение пропусков восстанавливает только небольшие участки, подтверждённые соседними точками. Уточнённая модель использует заранее обученные зависимости, а не подставляет TotalVolume из загруженной базы. Расчёт выполняется на CPU. База SQ3 используется только для сравнения. Порт применяется после перезапуска веб-версии; доступ только с этого компьютера.</p></details>
+ </div>
+ <footer class="settingsFooter"><button class="primary">Готово</button></footer>
+</form></dialog>
 <dialog id="manual" aria-labelledby="manualTitle">
  <div class="manualHeader"><div><h2 id="manualTitle">Обмеры кузова</h2><p>Введите размеры в пяти точках или добавьте свои</p></div><div><label for="manualUnits">Единицы измерения</label><select id="manualUnits"><option value="m">Метры (м)</option><option value="cm">Сантиметры (см)</option></select></div></div>
  <div class="manualTable"><table><thead><tr><th>№</th><th id="manualLength">Длина, м</th><th id="manualWidth">Ширина, м</th><th id="manualHeight">Высота, м</th><th>Объём, м³</th><th><span class="srOnly">Действия</span></th></tr></thead><tbody id="manualRows"></tbody></table></div>

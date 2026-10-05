@@ -34,7 +34,7 @@ public:
   });busy=true;
  }
  void poll(){if(busy&&task.wait_for(std::chrono::seconds(0))==std::future_status::ready){try{auto next=task.get();options=next.pose;result=std::move(next);++revision;}catch(const std::exception& e){error=e.what();}busy=false;phase=0;}}
- std::string metadata(){poll();std::ostringstream o;o<<std::setprecision(17)<<"{\"version\":\"3.34.0\",\"busy\":"<<(busy?"true":"false")<<",\"progress\":"<<progress.load()<<",\"phase\":"<<phase.load()<<",\"revision\":"<<revision<<",\"error\":"<<json(error)<<",\"heading\":"<<(full?view::heading(*full):empty?view::heading(*empty):0);
+ std::string metadata(){poll();std::ostringstream o;o<<std::setprecision(17)<<"{\"version\":\"3.35.18\",\"busy\":"<<(busy?"true":"false")<<",\"progress\":"<<progress.load()<<",\"phase\":"<<phase.load()<<",\"revision\":"<<revision<<",\"error\":"<<json(error)<<",\"heading\":"<<(full?view::heading(*full):empty?view::heading(*empty):0);
   auto model=[&](const char* key,const std::optional<Model>& m){o<<",\""<<key<<"\":";if(!m){o<<"null";return;}o<<"{\"scan\":"<<m->scan<<",\"label\":"<<json(m->label)<<",\"kind\":"<<m->kind<<",\"points\":"<<m->points.size()<<",\"group\":"<<m->selectedType<<",\"groups\":"<<m->availableTypes<<",\"lo\":["<<m->lo.x<<','<<m->lo.y<<','<<m->lo.z<<"],\"hi\":["<<m->hi.x<<','<<m->hi.y<<','<<m->hi.z<<"]}";};model("full",full);model("empty",empty);
   o<<",\"databaseRecords\":"<<database.ids.size()<<",\"result\":";
   if(!result)o<<"null";else{auto& r=*result;o<<"{\"angle\":"<<r.pose.angle<<",\"overlap\":"<<r.pose.alignmentOverlap<<",\"aligned\":"<<(r.pose.aligned?"true":"false")<<",\"volume\":";
